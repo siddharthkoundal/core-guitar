@@ -1,0 +1,9 @@
+{
+  "name": "G major scale, one octave (from 6th string, 3rd fret)",
+  "description": "Ascending then descending, ending on a held root.",
+  "tuning": "standard",
+  "bpm": 70,
+  "time_signature": [4, 4],
+  "default_duration": "8",
+  "notes": "6/3 6/5 5/2 5/3 5/5 4/2 4/4 4/5 | 4/4 4/2 5/5 5/3 5/2 6/5 6/3:4 r:4"
+}

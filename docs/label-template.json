@@ -1,0 +1,14 @@
+{
+  "audio": "2026-05-01_mac_chromatic_80_late5.wav",
+  "exercise": "../../exercises/chromatic_1234.json",
+  "mode": "reference",
+  "bpm": 80,
+  "tuning": "standard",
+  "device": "macbook",
+  "expected_verdict": "ok",
+  "errors": [
+    {"type": "late", "index": 5}
+  ],
+  "onsets_file": "2026-05-01_mac_chromatic_80_late5.onsets.txt",
+  "notes": "Free text for yourself. Delete onsets_file if you didn't hand-label onsets. Error types: late, early, wrong_note, missed_note, extra_note (uses 'after'), rushing, dragging, timing_offset, tuning_offset, weak_attack, cut_short, buzz, ringing."
+}

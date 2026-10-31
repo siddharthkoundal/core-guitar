@@ -1,0 +1,9 @@
+{
+  "name": "My riff (template - replace the notes)",
+  "description": "Placeholder pattern showing per-note durations. Replace 'notes' with the riff you are learning. Durations: :4 quarter, :8 eighth, :16 sixteenth, :4. dotted quarter, :8t eighth-triplet, r = rest.",
+  "tuning": "standard",
+  "bpm": 80,
+  "time_signature": [4, 4],
+  "default_duration": "8",
+  "notes": "5/0:4 5/3:8 5/5:8 4/2:4. 4/0:8 | 5/3:8 5/0:8 6/3:4 5/0:2"
+}
