@@ -134,3 +134,4 @@ proxy for the GA15II overdrive, so it needs real takes.
 | M2 | React/TS UI + local FastAPI backend: record or upload, replay, timestamped evidence playback, SQLite history, delete |
 | M3 | Local Ollama Q&A grounded in the findings JSON (cites finding IDs, refuses to guess beyond the measurements) |
 | M4 | Retry comparison of the same passage across attempts |
+# core-guitar
