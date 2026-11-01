@@ -16,7 +16,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+dev = ["pytest>=7", "httpx"]
+app = ["fastapi", "uvicorn", "python-multipart"]
 notebook = ["matplotlib>=3.7", "jupyter"]
 crepe = ["torch", "torchcrepe"]
 

@@ -1,0 +1,18 @@
+== wrong.wav (18.5 s) - mode: reference ==
+Exercise: Chromatic 1-2-3-4 (strings 6 to 1, frets 1-4) | tuning standard | 80 BPM
+Input quality: OK  (SNR 65.0 dB, peak -3.1 dBFS)
+
+Notes: 23/24 as expected | timing: 100.0% within +/-20 ms, mean +0.0 ms
+
+Top corrections:
+ 1. Wrong notes  [medium confidence, listen 0:07.6-0:09.5]
+    Observed: bar 2, beat 1.5 (0:08.4): expected E3, heard C3 (-4 semitones).
+    Possible causes (not measured): Finger landing one fret off during a position or string change. / Pick hitting the neighbouring string.
+    Drill: Isolate the two notes around the error. Play the change slowly 5 times: look, place the finger, then pick. Then 5 times without looking.
+
+All findings:
+   f1 0:08.4 wrong_note             medium bar 2, beat 1.5 (0:08.4): expected E3, heard C3 (-4 semitones).
+
+Uncertainty:
+ - Timing measurement uncertainty (10 ms) is a placeholder until M0 calibration; deviations between 20 and 30 ms are reported with low confidence.
+ - Ringing and buzz detectors are experimental and unvalidated; treat them as 'worth a listen', not facts.

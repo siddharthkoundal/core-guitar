@@ -136,6 +136,12 @@ def cmd_evaluate(args) -> int:
     return 0
 
 
+def cmd_serve(args) -> int:
+    from .server import serve
+
+    return serve(args.port, args.open)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="coreguitar", description="Guitar practice feedback (post-recording analysis).")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -176,6 +182,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("labels", help="directory of *.label.json files")
     p.add_argument("--json", help="write the report JSON here")
     p.set_defaults(fn=cmd_evaluate)
+
+    p = sub.add_parser("serve", help="start the localhost recording and analysis app")
+    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--open", action="store_true")
+    p.set_defaults(fn=cmd_serve)
 
     args = ap.parse_args(argv)
     try:

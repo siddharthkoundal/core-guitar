@@ -1,0 +1,18 @@
+== late.wav (18.5 s) - mode: reference ==
+Exercise: Chromatic 1-2-3-4 (strings 6 to 1, frets 1-4) | tuning standard | 80 BPM
+Input quality: OK  (SNR 65.0 dB, peak -3.1 dBFS)
+
+Notes: 24/24 as expected | timing: 95.8% within +/-20 ms, mean +3.4 ms
+
+Top corrections:
+ 1. Notes landing behind the beat  [high confidence, listen 0:06.1-0:07.8]
+    Observed: bar 1, beat 3.5 (0:06.9): 1 note (B2) late by about 80 ms.
+    Possible causes (not measured): The next fretting finger isn't ready, so the pick waits for it (common at string or position changes). / Hesitating on a stretch.
+    Drill: Loop from one beat before the late spot at 70% of target tempo, saying the count out loud. After 5 clean reps, add 5 BPM.
+
+All findings:
+   f1 0:06.9 timing_late            high   bar 1, beat 3.5 (0:06.9): 1 note (B2) late by about 80 ms.
+
+Uncertainty:
+ - Timing measurement uncertainty (10 ms) is a placeholder until M0 calibration; deviations between 20 and 30 ms are reported with low confidence.
+ - Ringing and buzz detectors are experimental and unvalidated; treat them as 'worth a listen', not facts.

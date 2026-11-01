@@ -1,0 +1,44 @@
+{
+  "name": "coreguitar-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "npm run dev",
+    "dev": "vite --host 127.0.0.1",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "coverage": "vitest run --coverage",
+    "build": "vite build",
+    "e2e": "node e2e/coverage.mjs --clean && COREGUITAR_COVERAGE=1 vite build && playwright test && node e2e/coverage.mjs && vite build"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.0",
+    "@eslint/js": "^10.0.0",
+    "@playwright/test": "^1.52.0",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "@vitest/coverage-v8": "^5.0.5",
+    "@types/istanbul-lib-instrument": "^1.7.0",
+    "eslint": "^10.14.0",
+    "globals": "^16.0.0",
+    "jsdom": "^26.1.0",
+    "istanbul-lib-instrument": "^6.0.0",
+    "istanbul-lib-coverage": "^3.2.0",
+    "istanbul-lib-report": "^3.0.0",
+    "istanbul-reports": "^3.1.0",
+    "typescript": "^5.8.0",
+    "typescript-eslint": "^8.72.1",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  }
+}

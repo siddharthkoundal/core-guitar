@@ -7,6 +7,17 @@ specific feedback, and retry.
 interface, for short, **clean-tone, single-note** exercises analysed **after**
 recording.
 
+**Stage 1A app.** A desktop-local browser UI now supports exercise selection,
+custom riffs, free play, PCM WAV microphone recording, file upload, and
+timestamped evidence playback. The analysis engine and its thresholds are
+unchanged. There is no score, automatic tempo adjustment, or automatic calibration.
+
+The studio uses a rock rehearsal-room visual style: amp-grille textures,
+gig-poster typography, and red/off-white controls. A three-step practice strip
+and signal-chain checklist keep setup visible on desktop and mobile. All artwork
+and fonts are local; the rock styling does not expand analysis beyond clean-tone,
+single-note playing. Reduced-motion and keyboard-focus support remain built in.
+
 Chords, distortion, backing tracks, video and live feedback are out of scope.
 The analyser detects them and declines them rather than guessing.
 
@@ -19,7 +30,9 @@ The analyser detects them and declines them rather than guessing.
 
 - All processing is local. No audio, findings or telemetry leave the machine.
 - Recordings go in `data/`, which git ignores.
-- To delete a take, delete its files. See [data/README.md](data/README.md).
+- App takes and analyses remain in `data/app/takes/` until you choose **Delete this
+  take** or **Delete all saved takes**. CLI recordings can still be deleted directly.
+  See [data/README.md](data/README.md).
 - The later language-model features (M3) are planned to run on local
   **Ollama** only.
 
@@ -30,6 +43,124 @@ python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"          # add ,notebook for the M0 explorer
 brew install ffmpeg                        # needed for iPhone .m4a files
 ```
+
+### Desktop-local app
+
+Requires Python 3.10+ and Node.js 22.13+ for the frontend toolchain.
+
+```bash
+.venv/bin/pip install -e ".[app,dev]"
+npm --prefix web ci
+npm start
+```
+
+Open <http://127.0.0.1:8765>. Server dependencies are optional and lazy-imported:
+the existing CLI commands do not import FastAPI or uvicorn. `serve` checks for
+both ffmpeg and ffprobe before starting. Stop it with Ctrl+C.
+
+All assets and requests use the same local origin, with no CDNs, telemetry,
+language models, or runtime outbound calls. The server binds **127.0.0.1 only**,
+accepts only localhost/127.0.0.1 host headers, and has no CORS support. This is
+not a phone/LAN app: remote microphone access needs a secure HTTPS origin and
+a separate authentication/network design, which are out of scope for Stage 1A.
+
+Run these shortcuts from the repository root after setup:
+
+| Command | Purpose |
+|---|---|
+| `npm start` | Build the frontend, then serve the complete app on port 8765 |
+| `npm run backend` | Start only the Python backend on port 8765 |
+| `npm run dev` | Start the frontend with live updates on port 5173 |
+| `npm run build` | Build the production frontend |
+| `npm test` | Run backend and frontend unit tests |
+| `npm run test:backend` | Run only Python tests |
+| `npm run test:frontend` | Run only frontend unit tests |
+| `npm run typecheck` | Check frontend TypeScript |
+| `npm run lint` | Lint the frontend |
+| `npm run e2e` | Run isolated browser tests and coverage |
+
+For development, use two terminals: `npm run backend` in one and `npm run dev`
+in the other, then open <http://127.0.0.1:5173>. Vite's `/api` proxy forwards
+to port 8765 on loopback. Stop each server with Ctrl+C.
+
+Inside `web/`, both `npm start` and `npm run dev` launch the frontend only.
+The root npm scripts are shortcuts to the existing tools, not a Node backend;
+they use the `.venv` created during setup and add no dependencies.
+
+### Browser recording and support
+
+- Chrome 150 and Safari 27 on macOS were manually checked at 48 kHz: both
+  captured PCM through an AudioWorklet and captured a 4 kHz speaker click.
+- Chrome reported echo cancellation, noise suppression and automatic gain
+  control all **false**. Safari reported echo cancellation **false** but did
+  **not expose NS/AGC settings**; those off requests cannot be independently
+  verified from `getSettings()`. The UI labels unreported settings explicitly.
+  This spike is a feasibility check, not a real-guitar accuracy validation.
+- The recorder requests EC/NS/AGC off, uses mono PCM16 WAV rather than
+  MediaRecorder, remembers the microphone device locally, and starts the click
+  only after receiving its first captured PCM buffer. Reference recording stops
+  one second after click playback ends; all recordings have a 180 second cap.
+- Set **macOS Mic Mode to Standard**. Use the clean amp channel in a quiet room
+  with the microphone 20-40 cm from the amp. The click must be audible through
+  speakers: **headphones lead to a no-click rejection**.
+- Device changes, a disconnected microphone, or an interrupted AudioContext
+  produce a partial take with a warning. Playback and submission remain available.
+  Permission denial or no device still offer upload and click download.
+- Uploads are streamed with a 100 MB cap, must contain audio lasting 2-180 seconds,
+  and are checked by content rather than extension/MIME. Both analysis and
+  evidence playback use the same float32 normalized `take.wav` at its native rate.
+  Lossy codecs warn that **clipping detection is less reliable**.
+- Quality and re-record advice come first. Coaching causes are hypotheses and
+  drills are suggestions, not measurements. Free mode describes playing without
+  judging correctness. Three consecutive rejections show the setup checklist.
+
+Single-worker analysis runs in a killable subprocess with a 300 second timeout.
+Cancellation keeps the take; deletion cancels any related work and removes its
+audio, metadata and analyses. Completed results persist on disk across restarts.
+There is no history database or take comparison UI in this stage.
+
+### Frontend structure
+
+```
+web/src/
+  main.tsx            entry point
+  app/                studio shell: layout and focus on phase changes
+  api/                local server client and response validation
+    types.ts          exercise, take, request and analysis contracts
+  audio/              PCM capture, click playback, WAV encoding
+    types.ts          recording and recorder state contracts
+  session/            session reducer and usePracticeSession workflow hook
+    types.ts          session state/events and capture method
+  components/         UI shared across features
+    types.ts          shared component props
+  features/
+    exercise/         exercise, custom riff and free-play selection
+      types.ts        exercise picker props
+    capture/          record/upload, live meter, take review
+      types.ts        capture component props and meter handle
+    results/          quality, findings, evidence playback, next steps
+      types.ts        results and next-step component props
+```
+
+- `session/usePracticeSession.ts` owns submission, polling, cancellation,
+  validated take reuse, retries and deletion, using `sessionReducer`.
+- Feature components receive state and callbacks as props. Only the session hook,
+  the exercise picker and the recorder call the API directly.
+- `features/capture/RecordingMeter.tsx` keeps 10 Hz audio meter updates in its
+  own subtree instead of rerendering microphone controls. Clipping stays flagged
+  until the next microphone attempt.
+- `components/ProcessingWarnings.tsx` is shared by capture and results without
+  pulling recorder code into results.
+- Tests sit next to the code they cover; `src/test-utils.tsx` is shared.
+- API contracts live under `api/types.ts`; audio and session state types live in
+  their domain folders. Each feature's component props are declared in that
+  feature's `types.ts`, with shared component props in `components/types.ts`.
+
+New UI goes in the matching `features/<area>/` folder. Code used by more than one
+feature goes in `components/`. These boundaries use React only, with no
+state-management dependencies.
+Unit tests cover workflow errors, cancellation, cached take reuse, tempo limits
+and meter render isolation; browser tests cover the complete studio workflow.
 
 ## Recording (no audio interface)
 
@@ -94,8 +225,39 @@ pentatonic box 1, and a riff template.
 ## Tests
 
 ```bash
-.venv/bin/pytest -q
+npm test
+npm run typecheck
+npm run lint
+npm --prefix web exec -- playwright install chromium  # once, if not installed
+npm run e2e
 ```
+
+Browser tests run against an isolated loopback server on port 8767, use a
+synthetic fake microphone, and do not write into your app take collection.
+`npm --prefix web run e2e` temporarily builds with local Istanbul instrumentation,
+enforces 80% aggregate source coverage for statements, branches, functions and
+lines, then restores an uninstrumented production build. Generated coverage,
+fixtures, traces and recordings are git-ignored. If a browser test fails, run
+`npm --prefix web run build` to restore the uninstrumented build before regular use.
+`npm --prefix web run coverage` reports focused unit-test coverage separately;
+it does not include browser integration coverage.
+Codec tests cover WAV, WebM/Opus, Ogg/Opus and M4A/AAC through ingest and analysis,
+including confident findings, evidence timestamps within 10 ms, and quality gates.
+CLI golden snapshots pin text and JSON (excluding `analyzed_at`) for three takes.
+The 60/120 second synthetic analysis spike took 2.58/3.68 seconds on this Mac;
+this is a local timing sample, not a cross-hardware performance guarantee.
+
+### Short manual guitar checks
+
+1. Clean chromatic: record, listen back, submit, and inspect the note table.
+2. Delay note index 5; click its timing finding and verify the audible evidence.
+3. Play a wrong note at index 9 of G major; inspect expected versus heard pitch.
+4. Use headphones for the click: expect `no_click` and re-record advice.
+5. Upload a Voice Memos `.m4a` of the same take; compare verdict/findings and
+   check the lossy warning (AAC is lossy; ALAC is not).
+6. Unplug the mic mid-take: expect an interrupted partial recording with a warning.
+7. Cancel recording: no upload. Cancel analysis: the take remains. Delete it:
+   normalized audio and result files are removed.
 
 The acceptance tests T1–T14 run on synthetic takes with known injected errors:
 
@@ -131,7 +293,7 @@ proxy for the GA15II overdrive, so it needs real takes.
 |---|---|
 | **M0** (kit ready) | Record 30–50 labelled takes, run `coreguitar evaluate`, set the thresholds |
 | **M1** (this) | Analysis engine + CLI + synthetic acceptance tests |
-| M2 | React/TS UI + local FastAPI backend: record or upload, replay, timestamped evidence playback, SQLite history, delete |
+| **Stage 1A** | Local FastAPI + React/TS: PCM record or upload, replay, timestamped evidence, quality gates, cancellation, file-backed retention and delete |
+| M2 (later) | SQLite practice history and richer session browsing; explicitly deferred from Stage 1A |
 | M3 | Local Ollama Q&A grounded in the findings JSON (cites finding IDs, refuses to guess beyond the measurements) |
 | M4 | Retry comparison of the same passage across attempts |
-# core-guitar

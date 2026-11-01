@@ -1,0 +1,13 @@
+== clean.wav (18.5 s) - mode: reference ==
+Exercise: Chromatic 1-2-3-4 (strings 6 to 1, frets 1-4) | tuning standard | 80 BPM
+Input quality: OK  (SNR 65.0 dB, peak -3.1 dBFS)
+
+Notes: 24/24 as expected | timing: 100.0% within +/-20 ms, mean +0.1 ms
+
+No confident corrections at the current thresholds. Nice take - try +5 BPM.
+
+All findings:
+
+Uncertainty:
+ - Timing measurement uncertainty (10 ms) is a placeholder until M0 calibration; deviations between 20 and 30 ms are reported with low confidence.
+ - Ringing and buzz detectors are experimental and unvalidated; treat them as 'worth a listen', not facts.
