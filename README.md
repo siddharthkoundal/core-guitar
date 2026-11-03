@@ -12,14 +12,68 @@ custom riffs, free play, PCM WAV microphone recording, file upload, and
 timestamped evidence playback. The analysis engine and its thresholds are
 unchanged. There is no score, automatic tempo adjustment, or automatic calibration.
 
-The studio uses a rock rehearsal-room visual style: amp-grille textures,
-gig-poster typography, and red/off-white controls. A three-step practice strip
+The studio uses a rock rehearsal-room visual style: gig-poster typography and
+red/off-white controls. A three-step practice strip
 and signal-chain checklist keep setup visible on desktop and mobile. All artwork
 and fonts are local; the rock styling does not expand analysis beyond clean-tone,
 single-note playing. Reduced-motion and keyboard-focus support remain built in.
 
-Chords, distortion, backing tracks, video and live feedback are out of scope.
-The analyser detects them and declines them rather than guessing.
+The **recording analyser** still declines chords and backing tracks rather than
+guessing. Distortion is declined in Mic + amp mode but analysed, with caveats, in
+Processor (USB) mode (see below). Separate browser learning rooms now offer scales, ear
+training and experimental live chord recognition; they do not change the
+recording analyser or its accuracy claims.
+
+### Learning rooms
+
+The existing rehearsal-room design and take workflow are retained. The navigation
+adds:
+
+- **Fretboard:** 55 scale entries covering all 48 reference choices, 12 tunings (including 7/8 strings), note/interval/pattern
+  displays, position guides, synthesized playback, metronome and scale practice.
+- **Ear training:** ten-question interval, single-note, scale-identification and
+  note-sequence quizzes with replay and answer feedback.
+- **ChordAI:** browser microphone chord recognition across nine chord qualities
+  and twelve roots, manual chord selection, local history and Ollama progression
+  suggestions. Similarity is not a calibrated probability of correctness.
+- **Coach:** goal- and level-based practice plans and follow-up conversation with
+  a local Ollama model. Plans are suggestions, not measurements.
+- **Library / Progress:** searchable scales, practice history, XP, levels, daily
+  streaks and achievements. Three consecutive clean Sequence runs at 120 BPM or
+  faster mark a scale/key combination learned; a later miss does not remove it.
+  Learning XP is not a score for recorded playing.
+
+CAGED major/minor and pentatonic forms and seven-note 3NPS shapes are available in
+standard six-string tuning. Other tunings retain the full interactive fretboard
+instead of presenting standard-tuning shapes as valid alternate-tuning fingerings.
+
+Learning settings/history are stored in this browser, separately from audio takes.
+Session history is capped at 100 entries and chord history at 200. Clearing browser
+site data removes browser learning data; deleting saved takes does not clear
+learning progress. The Progress room has a separate, confirmed reset.
+
+#### Optional local AI (no API key)
+
+Install [Ollama](https://ollama.com/). If it is not already running, start
+`ollama serve` in a separate terminal. Then download a model once and launch:
+
+```bash
+ollama pull llama3.2
+npm start
+```
+
+If Ollama is already running, do not start a second server. To select a different
+installed model, start core-guitar with `COREGUITAR_OLLAMA_MODEL=<model> npm start`.
+The backend talks only to `http://127.0.0.1:11434`; it does not accept a remote
+model endpoint. Coach and ChordAI report an explicit error if the local service or
+model is unavailable. The scale library, quizzes and existing analysis work
+without Ollama.
+
+These are original local implementations inspired by
+[Scale Teacher](https://github.com/SeanSnaider/Guitar-Scale-Tool). Its cloud Claude
+and web-research features are intentionally not used: local plans cannot claim to
+have searched the web or verified current research. Microphone recognition remains
+experimental; synthetic tests do not establish accuracy on real guitars.
 
 > **Accuracy status.** Every result below comes from *synthetic* audio. That
 > checks that the logic is consistent. It is **not** evidence of accuracy on
@@ -33,8 +87,8 @@ The analyser detects them and declines them rather than guessing.
 - App takes and analyses remain in `data/app/takes/` until you choose **Delete this
   take** or **Delete all saved takes**. CLI recordings can still be deleted directly.
   See [data/README.md](data/README.md).
-- The later language-model features (M3) are planned to run on local
-  **Ollama** only.
+- Optional language-model features run on local **Ollama** only. Installing Ollama
+  and downloading models require network access during setup, not during practice.
 
 ## Setup
 
@@ -58,8 +112,16 @@ Open <http://127.0.0.1:8765>. Server dependencies are optional and lazy-imported
 the existing CLI commands do not import FastAPI or uvicorn. `serve` checks for
 both ffmpeg and ffprobe before starting. Stop it with Ctrl+C.
 
-All assets and requests use the same local origin, with no CDNs, telemetry,
-language models, or runtime outbound calls. The server binds **127.0.0.1 only**,
+**Quickest first test (no guitar or microphone):** keep the default exercise and
+press **Try a demo take**. The local server generates a synthetic take of that
+riff with one note played 80 ms late (`POST /api/demo-take`), then uploads and
+analyzes it, so you land on results with a single timing finding. For a real take,
+press **Continue to capture** and record or upload. Custom riffs and free play
+are under **More options**.
+
+All browser assets and requests use the same local origin, with no CDNs, telemetry,
+or cloud calls. Optional AI requests are proxied to the fixed local Ollama service.
+The server binds **127.0.0.1 only**,
 accepts only localhost/127.0.0.1 host headers, and has no CORS support. This is
 not a phone/LAN app: remote microphone access needs a secure HTTPS origin and
 a separate authentication/network design, which are out of scope for Stage 1A.
@@ -117,7 +179,8 @@ they use the `.venv` created during setup and add no dependencies.
 Single-worker analysis runs in a killable subprocess with a 300 second timeout.
 Cancellation keeps the take; deletion cancels any related work and removes its
 audio, metadata and analyses. Completed results persist on disk across restarts.
-There is no history database or take comparison UI in this stage.
+There is no audio-take history database or take comparison UI in this stage;
+the learning-session history is separate browser-local data.
 
 ### Frontend structure
 
@@ -140,6 +203,10 @@ web/src/
       types.ts        capture component props and meter handle
     results/          quality, findings, evidence playback, next steps
       types.ts        results and next-step component props
+    scales/           theory catalog, fretboard, synthesis and scale practice
+    chords/           experimental browser chord recognition and progressions
+    coach/            local Ollama client and saved practice plans
+    learning/         ear quizzes, library, mastery and browser-local progress
 ```
 
 - `session/usePracticeSession.ts` owns submission, polling, cancellation,
@@ -172,6 +239,50 @@ and meter render isolation; browser tests cover the complete studio workflow.
    during the count-in bar. Then play the exercise.
 
 [docs/m0-protocol.md](docs/m0-protocol.md) has the full details.
+
+## Recording through a USB processor (e.g. the Soran Dual Stomp)
+
+A multi-effects pedal that shows up on the Mac as a USB audio interface can feed
+the analyser directly, and the analyser can describe the processed tone.
+
+1. Connect the pedal over USB-C. In the studio's **Input** box choose
+   **Processor (USB)**, then pick the pedal as the input device. The choice is
+   saved and also used by the tuner and note finder.
+2. Monitor through the pedal's headphone/amp output or the Mac's headphones.
+   The click does not need to be on the recording: in this mode the browser
+   records when the click started on its own audio clock and sends that offset
+   with the take, so the server builds the beat grid from it.
+3. Any patch works. Overdrive and compression are analysed instead of
+   rejected, but buzz findings are dropped and dynamics findings carry a note,
+   because drive hides both. A dry patch (no delay, reverb, octave or
+   harmoniser) gives the most reliable note and timing feedback. Delay and
+   reverb tails can read as extra or ringing notes.
+4. If on-beat notes are consistently reported late or early, set **Latency
+   correction** (±250 ms). Browser latency reports vary by device.
+
+Uploaded files in Processor mode have no click offset. Record them in the
+studio, or use Mic + amp mode with an audible click.
+
+Every analysis also includes an experimental **tone check**. It reports level
+and headroom, drive (clean, light or heavy), compression, brightness, the
+noise floor or gate, and mains hum, each with the measured values. It is not
+calibrated against real pedals, and it does not detect echo or delay.
+
+## Import a riff from Guitar Pro
+
+In **More options → Custom riff**, choose a `.gp3`, `.gp4` or `.gp5` file
+(export GP6/GP7 files as `.gp5` first). Then pick a track, a bar range and a
+tempo percentage, and click **Use as custom riff**. The conversion is lossy
+and lists everything it changed:
+
+- chords keep their highest note;
+- tied and dead notes become rests;
+- grace notes, effects and repeats are ignored;
+- 64th notes become 32nds, and tuplets other than triplets become plain notes.
+
+Tab tokens are kept when the track uses standard, drop D or half-step-down
+tuning. Other tunings fall back to note names. Files are capped at 5 MB and
+are not stored. The converted riff must fit the 180-second take limit.
 
 ## Usage
 
@@ -212,6 +323,7 @@ pentatonic box 1, and a riff template.
 | Input-quality gates | SNR, clipping, polyphony cue, click presence | Polyphony and noise OK on synthetic audio; **distortion gate uncalibrated** |
 | Dynamics (weak or uneven attacks) | Attack level, detrended by pitch, with same-pitch confirmation | Low confidence by design (the room and amp colour the loudness) |
 | Ringing, buzz | Spectral heuristics | **Experimental**: capped confidence, never top-3 |
+| Tone check (level, drive, compression, brightness, gate/hum) | Crest factor, harmonic balance, attack spread, decay, centroid, noise floor, hum peak | **Experimental, uncalibrated**; describes the signal, never judges it |
 
 ### What you get from an analysis
 
@@ -283,6 +395,10 @@ proxy for the GA15II overdrive, so it needs real takes.
   as a low-confidence extra note.
 - **Ringing and buzz detectors are unvalidated.** On synthetic audio the
   ringing detector barely separates injected ringing from clean playing.
+- **Processor mode is unverified on the real pedal.** The tone-check
+  thresholds come from synthetic audio. The pedal's USB channel layout is not
+  known, so input is mixed to mono. Browser latency reports may need the manual
+  correction.
 - **Language-model features are not built yet.** The engine never uses a
   language model for measurement. Follow-up questions (M3) will be answered
   from the findings JSON.

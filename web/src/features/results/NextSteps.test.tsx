@@ -16,10 +16,11 @@ it('delegates retries, picking and deletion without changing settings automatica
     <NextSteps bpm={80} rejections={2} onRetry={onRetry} onPick={onPick} onDelete={onDelete} />,
   );
   expect(onRetry).not.toHaveBeenCalled();
-  for (const name of ['Record again', 'Retry same settings', '+5 BPM', '-10 BPM']) {
+  expect(screen.queryByRole('button', { name: 'Retry same settings' })).toBeNull();
+  for (const name of ['Record again', '+5 BPM', '-10 BPM']) {
     await userEvent.click(screen.getByRole('button', { name }));
   }
-  expect(onRetry.mock.calls).toEqual([[], [], [5], [-10]]);
+  expect(onRetry.mock.calls).toEqual([[], [5], [-10]]);
   await userEvent.click(screen.getByRole('button', { name: 'Pick another exercise' }));
   await userEvent.click(screen.getByRole('button', { name: 'Delete this take' }));
   expect(onPick).toHaveBeenCalledOnce();

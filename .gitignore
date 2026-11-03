@@ -18,3 +18,4 @@ web/test-results/
 web/playwright-report/
 web/coverage/
 web/e2e/.generated/
+/node_modules/

@@ -3,7 +3,7 @@ import { act, cleanup, renderHook, waitFor } from '../test-utils';
 import { api, ApiError } from '../api';
 import type { Envelope, Take } from '../api/types';
 import type { Recording } from '../audio/types';
-import { usePracticeSession } from './usePracticeSession';
+import { usePracticeSession, withInputProfile } from './usePracticeSession';
 
 const take: Take = {
   take_id: 'take', duration_s: 5, sample_rate: 48000, channels: 1,
@@ -176,4 +176,15 @@ it('requires confirmation for deletion and reports deletion errors', async () =>
   await act(() => result.current.remove(false));
   expect(api.deleteTake).toHaveBeenCalledWith('take');
   expect(result.current.session.phase).toBe('select_exercise');
+});
+
+it('sends the click offset only for timed direct-input takes', () => {
+  const direct: Recording = { ...recording, inputProfile: 'direct', clickOffsetS: 2.123456 };
+  expect(withInputProfile({ mode: 'free', bpm: 80 }, direct))
+    .toEqual({ mode: 'free', bpm: 80, input_profile: 'direct', click_offset_s: 2.1235 });
+  expect(withInputProfile({ mode: 'free' }, direct)).toEqual({ mode: 'free', input_profile: 'direct' });
+  expect(withInputProfile({ mode: 'reference', exercise_id: 'x' }, { ...direct, clickOffsetS: 61 }))
+    .toEqual({ mode: 'reference', exercise_id: 'x', input_profile: 'direct' });
+  expect(withInputProfile({ mode: 'free', bpm: 80 }, { ...direct, inputProfile: 'mic' }))
+    .toEqual({ mode: 'free', bpm: 80, input_profile: 'mic' });
 });

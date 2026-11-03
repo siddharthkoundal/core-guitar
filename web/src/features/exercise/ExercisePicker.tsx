@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, errorMessage } from '../../api';
-import type { CustomExercise, Exercise, Preview, Tuning } from '../../api/types';
+import type { AnalysisRequest, CustomExercise, Exercise, Preview, Tuning } from '../../api/types';
+import { GuitarProImporter } from './GuitarProImporter';
 import type { ExercisePickerProps } from './types';
 
 export const defaultCustom: CustomExercise = {
@@ -8,7 +9,7 @@ export const defaultCustom: CustomExercise = {
   time_signature: [4, 4], default_duration: '8',
 };
 
-export function ExercisePicker({ onSelect }: ExercisePickerProps) {
+export function ExercisePicker({ onSelect, onDemo }: ExercisePickerProps) {
   const [mode, setMode] = useState('shipped');
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [exerciseId, setExerciseId] = useState('');
@@ -23,6 +24,8 @@ export function ExercisePicker({ onSelect }: ExercisePickerProps) {
       if (!active) return;
       setExercises(items);
       setExerciseId(items[0]?.id ?? '');
+      const first = items[0];
+      if (first) setCustom(value => ({ ...value, bpm: first.bpm }));
     }).catch(error => { if (active) setError(errorMessage(error)); });
     return () => { active = false; };
   }, []);
@@ -41,23 +44,21 @@ export function ExercisePicker({ onSelect }: ExercisePickerProps) {
       setCustom({ ...custom, tuning: value });
     }
   }
-  function select() {
+  function selection(): AnalysisRequest | null {
+    if (!Number.isFinite(custom.bpm) || custom.bpm < 30 || custom.bpm > 240) return null;
     if (mode === 'shipped' && selected) {
-      onSelect({ mode: 'reference', exercise_id: selected.id, bpm: custom.bpm });
+      return { mode: 'reference', exercise_id: selected.id, bpm: custom.bpm };
     } else if (mode === 'custom' && preview?.key === key) {
-      onSelect({ mode: 'reference', custom_exercise: custom, bpm: custom.bpm });
+      return { mode: 'reference', custom_exercise: custom, bpm: custom.bpm };
     } else if (mode === 'free') {
-      onSelect({ mode: 'free', bpm: custom.bpm, tuning: custom.tuning });
+      return { mode: 'free', bpm: custom.bpm, tuning: custom.tuning };
     }
+    return null;
   }
+  const ready = selection();
   return <section className="panel" aria-labelledby="choose-heading">
-    <p className="eyebrow">01 / THE SETLIST</p>
-    <h2 id="choose-heading">One passage. One focused take.</h2>
-    <label>Practice mode<select value={mode} onChange={event => { setMode(event.target.value); setError(''); }}>
-      <option value="shipped">Practice library</option>
-      <option value="custom">Custom riff</option>
-      <option value="free">Free play</option>
-    </select></label>
+    <p className="eyebrow">01 / PICK A RIFF</p>
+    <h2 id="choose-heading">Pick a riff and a tempo</h2>
     {mode === 'shipped' && <>
       <label>Exercise<select value={exerciseId} onChange={event => {
         setExerciseId(event.target.value);
@@ -65,7 +66,7 @@ export function ExercisePicker({ onSelect }: ExercisePickerProps) {
         if (ex) setCustom({ ...custom, bpm: ex.bpm });
       }}>{exercises.map(ex => <option key={ex.id} value={ex.id}>{ex.name}</option>)}</select></label>
       <p>{selected?.description}</p>
-      <p className="muted">{selected?.tuning} / {selected?.total_beats} beats</p>
+      <p className="muted">{selected?.tuning.replaceAll('_', ' ')} tuning / {selected?.total_beats} beats</p>
     </>}
     <div className="form-row">
       <label>BPM<input type="number" min="30" max="240" value={custom.bpm}
@@ -76,34 +77,51 @@ export function ExercisePicker({ onSelect }: ExercisePickerProps) {
           <option key={value} value={value}>{value.replaceAll('_', ' ')}</option>)}
       </select></label>}
     </div>
-    {mode === 'custom' && <>
-      <label>Notes<textarea value={custom.notes}
-        aria-describedby="notes-hint" aria-invalid={Boolean(error)}
-        onChange={event => setCustom({ ...custom, notes: event.target.value })} /></label>
-      <p id="notes-hint" className="muted">Note names or string/fret; e.g. 5/0:4 5/3:8 E3:4 r:8. Indices start at 0.</p>
-      <div className="form-row">
-        <label>Beats per bar<input type="number" min="1" max="16" value={custom.time_signature[0]}
-          onChange={event => setCustom({ ...custom,
-            time_signature: [Number(event.target.value), custom.time_signature[1]] })} /></label>
-        <label>Beat unit<select value={custom.time_signature[1]} onChange={event =>
-          setCustom({ ...custom, time_signature: [custom.time_signature[0], Number(event.target.value)] })}>
-          {[1, 2, 4, 8, 16].map(unit => <option key={unit}>{unit}</option>)}</select></label>
-        <label>Default duration<select value={custom.default_duration} onChange={event =>
-          setCustom({ ...custom, default_duration: event.target.value })}>
-          {['1', '2', '4', '8', '16', '32', '4.', '8t'].map(value => <option key={value}>{value}</option>)}
-        </select></label>
-      </div>
-      {preview?.key === key && <div className="preview">
-        <strong>{preview.value.total_beats} beats</strong>
-        <ol>{preview.value.notes.map(note => <li key={note.index}>
-          #{note.index}: {note.name}, bar {note.bar} beat {note.beat_in_bar}
-        </li>)}</ol>
-      </div>}
-    </>}
-    {mode === 'free' && <p className="notice">No reference: describes playing, does not judge correctness.</p>}
+    <details className="more-options" open={mode !== 'shipped'}>
+      <summary>More options: custom riff or free play</summary>
+      <label>Practice mode<select value={mode} onChange={event => { setMode(event.target.value); setError(''); }}>
+        <option value="shipped">Practice library</option>
+        <option value="custom">Custom riff</option>
+        <option value="free">Free play</option>
+      </select></label>
+      {mode === 'custom' && <>
+        <label>Notes<textarea value={custom.notes}
+          aria-describedby="notes-hint" aria-invalid={Boolean(error)}
+          onChange={event => setCustom({ ...custom, notes: event.target.value })} /></label>
+        <p id="notes-hint" className="muted">Note names or string/fret; e.g. 5/0:4 5/3:8 E3:4 r:8. Indices start at 0.</p>
+        <div className="form-row">
+          <label>Beats per bar<input type="number" min="1" max="16" value={custom.time_signature[0]}
+            onChange={event => setCustom({ ...custom,
+              time_signature: [Number(event.target.value), custom.time_signature[1]] })} /></label>
+          <label>Beat unit<select value={custom.time_signature[1]} onChange={event =>
+            setCustom({ ...custom, time_signature: [custom.time_signature[0], Number(event.target.value)] })}>
+            {[1, 2, 4, 8, 16].map(unit => <option key={unit}>{unit}</option>)}</select></label>
+          <label>Default duration<select value={custom.default_duration} onChange={event =>
+            setCustom({ ...custom, default_duration: event.target.value })}>
+            {['1', '2', '4', '8', '16', '32', '4.', '8t'].map(value => <option key={value}>{value}</option>)}
+          </select></label>
+        </div>
+        <GuitarProImporter onImport={exercise => { setCustom(exercise); setError(''); }} />
+        {preview?.key === key && <div className="preview">
+          <strong>{preview.value.total_beats} beats</strong>
+          <ol>{preview.value.notes.map(note => <li key={note.index}>
+            #{note.index}: {note.name}, bar {note.bar} beat {note.beat_in_bar}
+          </li>)}</ol>
+        </div>}
+      </>}
+      {mode === 'free' && <p className="notice">No reference: describes playing, does not judge correctness.</p>}
+    </details>
     <p role="alert">{error}</p>
-    <button className="primary" disabled={!Number.isFinite(custom.bpm) || custom.bpm < 30 || custom.bpm > 240
-      || (mode === 'shipped' && !selected) || (mode === 'custom' && preview?.key !== key)}
-      onClick={select}>Continue to capture</button>
+    <div className="actions">
+      <button className="primary" disabled={!ready} onClick={() => { if (ready) onSelect(ready); }}>
+        Continue to capture
+      </button>
+      {ready?.mode === 'reference' && <button aria-describedby="demo-hint" onClick={() => onDemo(ready)}>
+        Try a demo take
+      </button>}
+    </div>
+    {ready?.mode === 'reference' && <p id="demo-hint" className="muted">
+      No guitar? Analyze a generated take of this riff with one note played late.
+    </p>}
   </section>;
 }

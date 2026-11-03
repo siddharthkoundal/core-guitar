@@ -1,12 +1,11 @@
 import type { NextStepsProps } from './types';
 
 export function NextSteps({ bpm, rejections, onRetry, onPick, onDelete }: NextStepsProps) {
-  return <section className="panel" aria-labelledby="next-heading">
+  return <section className="next-steps" aria-labelledby="next-heading">
     <h2 id="next-heading">Your next step</h2>
     <p>Nothing changes automatically. Choose what to practise next.</p>
     <div className="actions">
       <button className="primary" onClick={() => onRetry()}>Record again</button>
-      <button onClick={() => onRetry()}>Retry same settings</button>
       <button disabled={bpm + 5 > 240} onClick={() => onRetry(5)}>+5 BPM</button>
       <button disabled={bpm - 10 < 30} onClick={() => onRetry(-10)}>-10 BPM</button>
       <button onClick={onPick}>Pick another exercise</button>

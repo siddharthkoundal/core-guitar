@@ -15,6 +15,19 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class CoachMessage(StrictModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(strict=True, min_length=1, max_length=12000, pattern=r"\S")
+
+
+class CoachRequest(StrictModel):
+    kind: Literal["plan", "progression"]
+    prompt: str = Field(strict=True, min_length=1, max_length=4000, pattern=r"\S")
+    level: Literal["beginner", "intermediate", "advanced"]
+    context: str = Field(strict=True, max_length=8000)
+    messages: list[CoachMessage] = Field(default_factory=list, max_length=12)
+
+
 class CustomExercise(StrictModel):
     notes: str = Field(min_length=1, max_length=10000)
     bpm: Bpm = 80
@@ -26,6 +39,13 @@ class CustomExercise(StrictModel):
         from ..reference import build_exercise
 
         return build_exercise(**self.model_dump())
+
+
+class GuitarProImport(StrictModel):
+    track: Annotated[int, Field(ge=0, le=255)] | None = None
+    start: Annotated[int, Field(ge=1, le=10000)] = 1
+    end: Annotated[int, Field(ge=1, le=10000)] | None = None
+    tempo_percent: Annotated[int, Field(ge=25, le=200)] = 100
 
 
 class ClickRequest(StrictModel):
@@ -54,6 +74,9 @@ class AnalysisRequest(StrictModel):
     custom_exercise: CustomExercise | None = None
     bpm: Bpm | None = None
     tuning: Tuning | None = None
+    input_profile: Literal["mic", "direct"] = "mic"
+    # Seconds from the first recorded sample to the first click, measured on the browser audio clock.
+    click_offset_s: Annotated[float, Field(ge=0, le=60, allow_inf_nan=False)] | None = None
 
     @model_validator(mode="after")
     def valid_mode(self):
@@ -62,4 +85,6 @@ class AnalysisRequest(StrictModel):
             raise ValueError("Reference mode requires exactly one exercise.")
         if self.mode == "free" and count:
             raise ValueError("Free mode does not accept a reference exercise.")
+        if self.click_offset_s is not None and self.mode == "free" and self.bpm is None:
+            raise ValueError("A click offset needs a tempo.")
         return self

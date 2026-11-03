@@ -22,7 +22,9 @@ def run_analysis(audio: str, exercise: dict | None, request: dict, output: str) 
 
     reference = build_exercise(**exercise) if exercise is not None else None
     result = analyze(audio, reference, free_bpm=request.get("bpm"),
-                     free_tuning=request.get("tuning") or "standard")
+                     free_tuning=request.get("tuning") or "standard",
+                     input_profile=request.get("input_profile") or "mic",
+                     click_offset_s=request.get("click_offset_s"))
     write_json(Path(output), result)
 
 

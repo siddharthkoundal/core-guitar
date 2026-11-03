@@ -21,14 +21,22 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .. import SCHEMA_VERSION, __version__
+from ..guitarpro import GP_SUFFIXES, MAX_GP_BYTES, GuitarProError
 from ..ingest import MAX_UPLOAD_BYTES, IngestError, ingest_audio
 from ..reference import load_exercise
+from .coach import CoachBodyLimitMiddleware, CoachError
 from .jobs import Jobs
-from .schemas import AnalysisRequest, ClickRequest, CustomExercise, TakeMeta
+from .schemas import AnalysisRequest, ClickRequest, CoachRequest, CustomExercise, GuitarProImport, TakeMeta
 from .store import Store, valid_id, write_json
 
 ROOT = Path(__file__).resolve().parents[3]
 logger = logging.getLogger(__name__)
+DEMO_LATE_NOTE = 5
+DEMO_LATE_MS = 80.0
+
+
+UPLOAD_LIMITS = {"/api/takes": (MAX_UPLOAD_BYTES, "100 MB", "Choose a smaller audio file."),
+                 "/api/import/guitarpro": (MAX_GP_BYTES, "5 MB", "Choose a smaller Guitar Pro file.")}
 
 
 class UploadLimitMiddleware:
@@ -36,8 +44,10 @@ class UploadLimitMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or scope["path"] != "/api/takes" or scope["method"] != "POST":
+        limit = UPLOAD_LIMITS.get(scope.get("path", "")) if scope["type"] == "http" else None
+        if limit is None or scope["method"] != "POST":
             return await self.app(scope, receive, send)
+        max_bytes, label, advice = limit
         total = 0
         started = False
 
@@ -45,9 +55,8 @@ class UploadLimitMiddleware:
             nonlocal total
             message = await receive()
             total += len(message.get("body", b""))
-            if total > MAX_UPLOAD_BYTES + 64 * 1024:
-                raise IngestError("too_large", "The uploaded file exceeds the 100 MB limit.",
-                                  "Choose a smaller audio file.")
+            if total > max_bytes + 64 * 1024:
+                raise IngestError("too_large", f"The uploaded file exceeds the {label} limit.", advice)
             return message
 
         async def tracked_send(message):
@@ -58,9 +67,9 @@ class UploadLimitMiddleware:
         headers = dict(scope.get("headers", []))
         try:
             size = int(headers.get(b"content-length", b"0"))
-            if size > MAX_UPLOAD_BYTES + 64 * 1024:
-                response = JSONResponse({"code": "too_large", "message": "Upload exceeds 100 MB.",
-                                         "advice": "Choose a smaller audio file."}, status_code=413)
+            if size > max_bytes + 64 * 1024:
+                response = JSONResponse({"code": "too_large", "message": f"Upload exceeds {label}.",
+                                         "advice": advice}, status_code=413)
                 return await response(scope, receive, send)
             await self.app(scope, limited_receive, tracked_send)
         except IngestError as exc:
@@ -106,6 +115,7 @@ def create_app(*, data_root: Path | None = None, dist_root: Path | None = None,
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.store = store
     app.add_middleware(UploadLimitMiddleware)
+    app.add_middleware(CoachBodyLimitMiddleware)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1"])
 
     @app.middleware("http")
@@ -126,6 +136,11 @@ def create_app(*, data_root: Path | None = None, dist_root: Path | None = None,
     @app.exception_handler(ValueError)
     async def value_error(request: Request, exc: ValueError):
         return JSONResponse({"code": "invalid_request", "message": str(exc)}, status_code=422)
+
+    @app.exception_handler(CoachError)
+    async def coach_error(request: Request, exc: CoachError) -> JSONResponse:
+        return JSONResponse({"code": exc.code, "message": exc.message, "advice": exc.advice},
+                            status_code=exc.status)
 
     @app.exception_handler(FileNotFoundError)
     async def missing(request: Request, exc):
@@ -164,6 +179,16 @@ def create_app(*, data_root: Path | None = None, dist_root: Path | None = None,
         return {"app_version": __version__, "schema_version": SCHEMA_VERSION,
                 "ffmpeg": bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))}
 
+    @app.get("/api/coach/status")
+    def coach_status() -> dict:
+        from .coach import status
+        return status()
+
+    @app.post("/api/coach")
+    def coach_generate(request: CoachRequest) -> dict[str, str]:
+        from .coach import ask
+        return ask(request)
+
     @app.get("/api/exercises")
     def list_exercises():
         return [
@@ -189,6 +214,18 @@ def create_app(*, data_root: Path | None = None, dist_root: Path | None = None,
         return Response(output.getvalue(), media_type="audio/wav",
                         headers={"Content-Disposition": 'attachment; filename="click.wav"'})
 
+    @app.post("/api/demo-take")
+    def demo_take(request: ClickRequest):
+        """Synthetic take of the exercise with one late note, for trying the app without a guitar."""
+        from ..synth import TakeSpec, render_take
+        ex = select_exercise(request.exercise_id, request.custom, request.bpm)
+        late = min(DEMO_LATE_NOTE, len(ex.notes) - 1)
+        audio, _ = render_take(ex, TakeSpec(deviations_ms={late: DEMO_LATE_MS}))
+        output = io.BytesIO()
+        sf.write(output, audio, 44100, format="WAV", subtype="PCM_16")
+        return Response(output.getvalue(), media_type="audio/wav",
+                        headers={"Content-Disposition": 'attachment; filename="demo-take.wav"'})
+
     @app.post("/api/takes", status_code=201)
     def take(file: UploadFile = File(), meta: str = Form()):
         metadata = TakeMeta.model_validate_json(meta)
@@ -206,6 +243,24 @@ def create_app(*, data_root: Path | None = None, dist_root: Path | None = None,
             raise
         return {key: value[key] for key in ("take_id", "duration_s", "sample_rate",
                                             "channels", "codec", "lossy", "source")}
+
+    @app.post("/api/import/guitarpro")
+    def import_guitarpro(file: UploadFile = File(), options: str = Form("{}")):
+        """Convert one track/measure range of a GP3-5 file into custom-exercise fields. Nothing is stored."""
+        from ..guitarpro import convert
+        opts = GuitarProImport.model_validate_json(options)
+        name = (file.filename or "").lower()
+        if not name.endswith(GP_SUFFIXES):
+            raise GuitarProError("Choose a .gp3, .gp4 or .gp5 file (GP6/GP7 .gpx/.gp files: export as .gp5 first).")
+        data = file.file.read(MAX_GP_BYTES + 1)
+        result = convert(data, track=opts.track, start=opts.start, end=opts.end, tempo_percent=opts.tempo_percent)
+        try:
+            ex = select_exercise(None, CustomExercise(**result["exercise"]))
+        except ValidationError as exc:
+            raise GuitarProError(f"The converted riff isn't a valid exercise: {exc.errors()[0]['msg']}") from exc
+        except ValueError as exc:
+            raise GuitarProError(f"{exc} Choose fewer measures or a faster tempo.") from exc
+        return {**result, "total_beats": ex.total_beats, "note_count": len(ex.notes)}
 
     @app.get("/api/takes/{take_id}/audio")
     def audio(take_id: str):

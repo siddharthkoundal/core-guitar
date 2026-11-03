@@ -10,6 +10,7 @@ import type {
   QualityPanelProps,
   ResultsProps,
   Seek,
+  ToneCheckPanelProps,
 } from './types';
 
 function time(seconds: number): string {
@@ -46,6 +47,22 @@ export function QualityPanel({ envelope }: QualityPanelProps) {
       <h3>Please re-record</h3>
       <ul>{envelope.result.re_record.reasons.map(reason => <li key={reason}>{reason}</li>)}</ul>
     </div>}
+  </section>;
+}
+export function ToneCheckPanel({ tone }: ToneCheckPanelProps) {
+  const metrics = tone.metrics;
+  return <section className="tone-check" aria-labelledby="tone-heading">
+    <h2 id="tone-heading">Tone check <span className="badge">experimental</span></h2>
+    <p className="muted">{tone.input_profile === 'direct' ? 'Processor (USB) input' : 'Mic + amp input'} ·
+      peak {scalar(metrics['peak_dbfs'])} dBFS · noise floor {scalar(metrics['noise_floor_dbfs'])} dBFS</p>
+    <ul className="tone-traits">{tone.traits.map(trait => <li key={trait.code}
+      className={trait.attention ? 'attention' : undefined} data-tone-code={trait.code}>
+      <strong>{trait.label}</strong> <span>{trait.detail}</span>
+    </li>)}</ul>
+    {tone.advice.length > 0 && <><h3>Suggestions (not measured)</h3>
+      <ul>{tone.advice.map(item => <li key={item}>{item}</li>)}</ul></>}
+    <details><summary>Measurements</summary><pre>{JSON.stringify(metrics, null, 2)}</pre></details>
+    <p className="muted">{tone.caveat}</p>
   </section>;
 }
 export function NoteTable({ result, seek }: NoteTableProps) {
@@ -113,7 +130,34 @@ export function Priorities({ result, seek }: PrioritiesProps) {
     </article>)}
   </section>;
 }
-export function Results({ envelope }: ResultsProps) {
+function PracticeSummary({ result, seek }: { result: AnalysisResult; seek: Seek }) {
+  const priority = result.priorities[0];
+  const listeningPoint = result.listening_points[0];
+  const finding = result.findings.find(item => !item.experimental);
+  const observation = priority?.observation ?? listeningPoint?.observation ?? finding?.message;
+  const evidence = priority?.evidence ?? listeningPoint?.evidence ?? finding?.evidence;
+  const drill = priority?.drill ?? listeningPoint?.if_unintended_try;
+  const heading = result.mode === 'free'
+    ? 'What we heard'
+    : priority ? 'First thing to work on' : observation ? 'Measured observation' : 'No measured findings';
+
+  return <section className="practice-summary" aria-labelledby="practice-summary-heading">
+    <p className="eyebrow">THE TAKEAWAY</p>
+    <h2 id="practice-summary-heading">{heading}</h2>
+    {observation
+      ? <p className="summary-observation">{observation}</p>
+      : <p>{result.mode === 'free'
+        ? 'This take is descriptive, not a correctness check.'
+        : 'No findings at the current measurement thresholds.'}</p>}
+    {finding && !priority && !listeningPoint &&
+      <p className="muted">{finding.confidence_label} confidence · no practice priority assigned</p>}
+    {evidence && <button className="primary" onClick={() => seek(evidence)}>
+      Listen to this moment
+    </button>}
+    {drill && <p className="summary-drill"><strong>Drill (suggestion)</strong> {drill}</p>}
+  </section>;
+}
+export function Results({ envelope, nextSteps }: ResultsProps) {
   const player = useRef<HTMLAudioElement>(null);
   const stopAt = useRef<number | null>(null);
   const [error, setError] = useState('');
@@ -140,25 +184,39 @@ export function Results({ envelope }: ResultsProps) {
   const result = envelope.result;
   const alignment = result.summary?.['alignment'];
   const matches = alignment && typeof alignment === 'object' && !Array.isArray(alignment) ? alignment['match'] : null;
+  const findingCount = result.findings.filter(finding => !finding.experimental).length;
   return <div className="panel results">
     <QualityPanel envelope={envelope} />
+    {!result.re_record.requested && <PracticeSummary result={result} seek={seek} />}
+    {!result.re_record.requested && result.mode === 'reference' &&
+      <p className="counts">
+        {scalar(matches)}/{scalar(result.summary?.['notes_expected'])} notes matched
+        {' · '}
+        {findingCount
+          ? `${findingCount} measured ${findingCount === 1 ? 'finding' : 'findings'}`
+          : 'no measured findings at current thresholds'}
+      </p>}
+    {nextSteps}
+    {result.tone && <ToneCheckPanel tone={result.tone} />}
     <audio ref={player} aria-label="Evidence playback" controls preload="auto"
       src={`/api/takes/${envelope.take_id}/audio`} onError={() =>
         setError('Could not load normalized evidence audio. Check that this take still exists.')} />
     <p role="alert">{error}</p>
     {result.mode === 'free' && <p className="notice">No reference: describes playing, does not judge correctness.</p>}
     {!result.re_record.requested && <>
-      {result.mode === 'reference' && <p className="counts">{scalar(matches)}/{scalar(result.summary?.['notes_expected'])} notes matched</p>}
       {result.mode === 'free' && result.summary && <details><summary>Descriptive summary</summary>
         <pre>{JSON.stringify(result.summary, null, 2)}</pre></details>}
-      <NoteTable result={result} seek={seek} />
-      <EvidenceTimeline findings={result.findings} seek={seek} />
-      <FindingsList findings={result.findings} seek={seek} />
-      <Priorities result={result} seek={seek} />
+      <details className="analysis-details">
+        <summary>Full analysis details</summary>
+        <NoteTable result={result} seek={seek} />
+        <EvidenceTimeline findings={result.findings} seek={seek} />
+        <FindingsList findings={result.findings} seek={seek} />
+        <Priorities result={result} seek={seek} />
+        <section aria-labelledby="uncertainty-heading"><h2 id="uncertainty-heading">Uncertainty</h2>
+          <ul>{result.uncertainty.map(note => <li key={note}>{note}</li>)}</ul>
+          <p>Accuracy is validated only on synthetic audio. Real guitar and room reliability remains unverified.</p>
+        </section>
+      </details>
     </>}
-    <section aria-labelledby="uncertainty-heading"><h2 id="uncertainty-heading">Uncertainty</h2>
-      <ul>{result.uncertainty.map(note => <li key={note}>{note}</li>)}</ul>
-      <p>Accuracy is validated only on synthetic audio. Real guitar and room reliability remains unverified.</p>
-    </section>
   </div>;
 }

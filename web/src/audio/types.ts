@@ -36,4 +36,7 @@ export interface Recording {
   partial: boolean;
   source: "recording" | "upload";
   name: string;
+  /** Seconds from the first recorded sample to the first click, on the browser audio clock (direct input). */
+  clickOffsetS?: number;
+  inputProfile?: "mic" | "direct";
 }

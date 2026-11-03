@@ -1,24 +1,20 @@
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
+import { test } from './fixtures';
 import type { Page, Response } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseEnvelope } from '../src/api';
 import type { Envelope } from '../src/api';
 
-test.afterEach(async ({ page }) => {
-  const data = await page.evaluate(() => '__coverage__' in window
-    ? JSON.stringify(window.__coverage__) : null);
-  if (data) {
-    mkdirSync('coverage/e2e', { recursive: true });
-    writeFileSync(`coverage/e2e/${randomUUID()}.json`, data);
-  }
-});
 async function select(page: Page) {
   await page.goto('/');
   await page.getByRole('combobox', { name: 'Exercise', exact: true }).selectOption('chromatic_1234');
   await page.getByRole('button', { name: 'Continue to capture' }).click();
+}
+async function mode(page: Page, value: 'custom' | 'free') {
+  await page.getByText('More options: custom riff or free play').click();
+  await page.getByRole('combobox', { name: 'Practice mode' }).selectOption(value);
 }
 async function upload(page: Page, filename = 'findings.wav') {
   await page.getByRole('button', { name: 'Upload', exact: true }).click();
@@ -63,12 +59,12 @@ test('rock studio stays accessible and fits desktop and mobile without page over
   for (const width of [1440, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto('/');
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Less talk.More rock.');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Play a riff. Get feedback.');
     await expect(page.getByRole('complementary', { name: 'Before you hit record' })).toBeVisible();
     expect(await page.evaluate(() =>
       document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
-    await page.getByLabel('Practice mode').selectOption('custom');
+    await mode(page, 'custom');
     await expect(page.getByRole('textbox', { name: 'Notes', exact: true })).toBeVisible();
     expect(await page.evaluate(() =>
       document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -79,6 +75,17 @@ test('rock studio stays accessible and fits desktop and mobile without page over
   await expect(page.getByRole('link', { name: 'Skip to practice' })).toBeVisible();
 });
 
+test('demo take reaches results from the first screen without a guitar', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('combobox', { name: 'Exercise', exact: true }).selectOption('chromatic_1234');
+  const response = done(page);
+  await page.getByRole('button', { name: 'Try a demo take' }).click();
+  const result = await envelope(await response);
+  await expect(page.getByRole('heading', { name: 'Your next step' })).toBeVisible();
+  expect(confident(result).map(([type]) => type)).toEqual(['timing_late']);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+});
+
 test('upload findings match direct analyze and evidence seeks normalized audio', async ({ page }) => {
   await select(page);
   await upload(page);
@@ -86,6 +93,7 @@ test('upload findings match direct analyze and evidence seeks normalized audio',
   expect(confident(result)).toEqual(confident(expected()));
   const finding = result.result.findings.find(finding => finding.type === 'timing_late');
   if (!finding) throw new Error('Missing timing finding');
+  await page.getByText('Full analysis details').click();
   await page.locator('[data-finding-type="timing_late"]').click();
   await expect.poll(() => page.getByLabel('Evidence playback').evaluate(audio =>
     audio instanceof HTMLAudioElement ? audio.currentTime : -1)).toBeGreaterThanOrEqual(finding.evidence.play_from_s);
@@ -103,6 +111,26 @@ test('PCM browser recording has the same confident findings as the synthetic WAV
   expect(result.source).toBe('recording');
   expect(result.lossy).toBe(false);
   expect(confident(result)).toEqual(confident(expected()));
+});
+
+test('Free mode has a warm-up click and an audible recording count-in', async ({ page }) => {
+  await page.goto('/');
+  await mode(page, 'free');
+  await page.getByRole('button', { name: 'Continue to capture' }).click();
+  await page.getByRole('button', { name: 'Start warm-up metronome' }).click();
+  await expect(page.getByText('Warm-up metronome is running.')).toBeVisible();
+  await page.getByRole('button', { name: 'Mute warm-up click' }).click();
+  await expect(page.getByRole('button', { name: 'Unmute warm-up click' })).toBeVisible();
+  const volume = page.getByRole('slider', { name: /click volume/i });
+  await volume.press('ArrowDown');
+  await expect(volume).toHaveValue('65');
+  await page.getByRole('button', { name: 'Stop warm-up metronome' }).click();
+
+  await page.getByRole('button', { name: 'Enable microphone' }).click();
+  await page.getByRole('button', { name: 'Start recording' }).click();
+  await expect(page.getByText('COUNT-IN')).toBeVisible({ timeout: 10000 });
+  await page.getByRole('button', { name: 'Stop recording' }).click();
+  await expect(page.getByRole('heading', { name: 'Listen before you submit' })).toBeVisible();
 });
 
 for (const [name, message] of [['NotAllowedError', 'Microphone permission was denied'],
@@ -198,13 +226,13 @@ test('AudioContext interruption produces a playable partial take warning', async
 
 test('custom riff preview and free-play capture remain distinct', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('combobox', { name: 'Practice mode' }).selectOption('custom');
+  await mode(page, 'custom');
   await page.getByRole('textbox', { name: 'Notes' }).fill('E2:4 G2:4');
   await expect(page.getByText('#1: G2, bar 1 beat 2')).toBeVisible();
   await page.getByRole('button', { name: 'Continue to capture' }).click();
   await expect(page.getByRole('heading', { name: '80 BPM / reference mode' })).toBeVisible();
   await page.getByRole('button', { name: 'Pick another exercise' }).click();
-  await page.getByRole('combobox', { name: 'Practice mode' }).selectOption('free');
+  await mode(page, 'free');
   await page.getByRole('button', { name: 'Continue to capture' }).click();
   await upload(page);
   const result = await submit(page);
@@ -265,7 +293,7 @@ test('missing remembered device can be reset, selected, stopped, and retried exp
 
 test('invalid custom notes are explained and cannot be submitted until corrected', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('combobox', { name: 'Practice mode' }).selectOption('custom');
+  await mode(page, 'custom');
   await page.getByRole('textbox', { name: 'Notes' }).fill('not-a-note');
   await expect(page.getByRole('button', { name: 'Continue to capture' })).toBeDisabled();
   await expect(page.getByText(/Invalid note/)).toBeVisible();

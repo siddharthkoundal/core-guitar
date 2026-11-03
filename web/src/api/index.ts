@@ -7,12 +7,15 @@ import type {
   Exercise,
   Evidence,
   Finding,
+  GuitarProImport,
+  GuitarProImportOptions,
   Json,
   JsonObject,
   Preview,
   Priority,
   Take,
   TakeMeta,
+  ToneCheck,
   TrackSettings,
 } from "./types";
 
@@ -83,6 +86,25 @@ function settings(value: unknown): value is TrackSettings {
     (value["deviceId"] === undefined || typeof value["deviceId"] === "string")
   );
 }
+function tone(value: unknown): value is ToneCheck {
+  return (
+    object(value) &&
+    value["experimental"] === true &&
+    (value["input_profile"] === "mic" || value["input_profile"] === "direct") &&
+    jsonObject(value["metrics"]) &&
+    Array.isArray(value["traits"]) &&
+    value["traits"].every(
+      (trait) =>
+        object(trait) &&
+        ["code", "label", "detail"].every(
+          (key) => typeof trait[key] === "string",
+        ) &&
+        typeof trait["attention"] === "boolean",
+    ) &&
+    strings(value["advice"]) &&
+    typeof value["caveat"] === "string"
+  );
+}
 function result(value: unknown): value is AnalysisResult {
   if (
     !object(value) ||
@@ -122,7 +144,8 @@ function result(value: unknown): value is AnalysisResult {
         typeof point["if_unintended_try"] === "string" &&
         evidence(point["evidence"]),
     ) &&
-    strings(value["uncertainty"])
+    strings(value["uncertainty"]) &&
+    (value["tone"] === undefined || value["tone"] === null || tone(value["tone"]))
   );
 }
 function envelope(value: unknown): value is Envelope {
@@ -208,6 +231,50 @@ export class ApiError extends Error {
     super(message);
   }
 }
+const tunings: readonly unknown[] = ["standard", "drop_d", "half_step_down"];
+function customExercise(value: unknown): value is CustomExercise {
+  if (!object(value)) return false;
+  const sig = value["time_signature"];
+  return (
+    typeof value["notes"] === "string" &&
+    typeof value["bpm"] === "number" &&
+    tunings.includes(value["tuning"]) &&
+    typeof value["default_duration"] === "string" &&
+    Array.isArray(sig) &&
+    sig.length === 2 &&
+    sig.every((n) => typeof n === "number")
+  );
+}
+function gpTrack(value: unknown): boolean {
+  return (
+    object(value) &&
+    typeof value["index"] === "number" &&
+    typeof value["name"] === "string" &&
+    typeof value["strings"] === "number" &&
+    (value["tuning"] === null || tunings.includes(value["tuning"])) &&
+    typeof value["percussion"] === "boolean"
+  );
+}
+export function isGuitarProImport(value: unknown): value is GuitarProImport {
+  return (
+    object(value) &&
+    typeof value["title"] === "string" &&
+    typeof value["artist"] === "string" &&
+    [
+      "source_bpm",
+      "track",
+      "measure_count",
+      "start",
+      "end",
+      "total_beats",
+      "note_count",
+    ].every((key) => typeof value[key] === "number") &&
+    Array.isArray(value["tracks"]) &&
+    value["tracks"].every(gpTrack) &&
+    customExercise(value["exercise"]) &&
+    strings(value["warnings"])
+  );
+}
 async function response(
   path: string,
   options: RequestInit = {},
@@ -244,6 +311,14 @@ function post(body: unknown, signal?: AbortSignal): RequestInit {
     ...(signal ? { signal } : {}),
   };
 }
+function exerciseBody(selection: AnalysisRequest) {
+  return {
+    ...(selection.exercise_id
+      ? { exercise_id: selection.exercise_id }
+      : { custom: selection.custom_exercise }),
+    ...(selection.bpm ? { bpm: selection.bpm } : {}),
+  };
+}
 export const api = {
   exercises: () =>
     read(
@@ -254,22 +329,28 @@ export const api = {
   preview: (custom: CustomExercise, signal: AbortSignal) =>
     read("/exercises/preview", isPreview, post(custom, signal)),
   click: async (selection: AnalysisRequest) =>
-    (
-      await response(
-        "/click",
-        post({
-          ...(selection.exercise_id
-            ? { exercise_id: selection.exercise_id }
-            : { custom: selection.custom_exercise }),
-          ...(selection.bpm ? { bpm: selection.bpm } : {}),
-        }),
-      )
-    ).blob(),
+    (await response("/click", post(exerciseBody(selection)))).blob(),
+  demoTake: async (selection: AnalysisRequest, signal?: AbortSignal) =>
+    (await response("/demo-take", post(exerciseBody(selection), signal))).blob(),
   upload: (file: Blob, meta: TakeMeta, signal: AbortSignal) => {
     const body = new FormData();
     body.append("file", file, meta.original_name);
     body.append("meta", JSON.stringify(meta));
     return read("/takes", isTake, { method: "POST", body, signal });
+  },
+  importGuitarPro: (
+    file: File,
+    options: GuitarProImportOptions,
+    signal?: AbortSignal,
+  ) => {
+    const body = new FormData();
+    body.append("file", file, file.name);
+    body.append("options", JSON.stringify(options));
+    return read("/import/guitarpro", isGuitarProImport, {
+      method: "POST",
+      body,
+      ...(signal ? { signal } : {}),
+    });
   },
   analyze: (takeId: string, selection: AnalysisRequest, signal?: AbortSignal) =>
     read(

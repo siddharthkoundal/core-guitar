@@ -53,6 +53,24 @@ class Thresholds:
     ringing_rel_db: float = -10.0
     buzz_excess_db: float = 6.0
 
+    # --- tone check (descriptive labels only; placeholders, uncalibrated on real pedals) ---
+    tone_level_hot_dbfs: float = -1.0
+    tone_level_low_dbfs: float = -30.0
+    # Harmonics 5-20 vs 1-4. Clean synthetic plucks read about -15 to -13.5 dB. Even a square wave
+    # only reaches about -11, so a squashed (low crest) and sustained (low decay) envelope also counts as drive.
+    tone_drive_light_ratio_db: float = -10.0
+    tone_drive_heavy_ratio_db: float = -8.0
+    tone_drive_light_crest_db: float = 9.0
+    tone_drive_heavy_crest_db: float = 6.0
+    tone_drive_heavy_decay_db: float = 1.0
+    tone_compressed_crest_db: float = 9.0
+    tone_compressed_attack_spread_db: float = 1.5
+    tone_bright_centroid_hz: float = 2500.0
+    tone_dark_centroid_hz: float = 700.0
+    # Digital-silence floor between notes; a room mic never gets this quiet.
+    tone_gate_floor_dbfs: float = -85.0
+    tone_hum_prominence_db: float = 15.0
+
     # --- prioritisation ---
     max_priorities: int = 3
     min_priority_confidence: float = 0.5

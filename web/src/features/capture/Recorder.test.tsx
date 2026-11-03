@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { act, cleanup, render, screen } from '../../test-utils';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '../../test-utils';
 import { PcmCapture } from '../../audio/recorder';
 import type * as CaptureModule from '../../audio/recorder';
 import type * as WarningsModule from '../../components/ProcessingWarnings';
@@ -7,6 +7,13 @@ import { Recorder } from './Recorder';
 
 let callbacks: ConstructorParameters<typeof PcmCapture>[0];
 const warningsRendered = vi.hoisted(() => vi.fn());
+vi.mock('../../audio/metronome', () => ({
+  MetronomePlayer: class {
+    start() {}
+    stop() {}
+    setVolume() {}
+  },
+}));
 vi.mock('../../audio/recorder', async importOriginal => {
   const actual = await importOriginal<typeof CaptureModule>();
   return {
@@ -28,7 +35,12 @@ vi.mock('../../components/ProcessingWarnings', async importOriginal => {
     },
   };
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); warningsRendered.mockClear(); });
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  warningsRendered.mockClear();
+});
 
 it('updates elapsed time, input level and sticky clipping without rerendering recorder controls', () => {
   render(<Recorder selection={{ mode: 'free', bpm: 80 }} onRecorded={vi.fn()} onUpload={vi.fn()} />);
@@ -62,4 +74,63 @@ it('resets meter and clipping for the next microphone attempt and disposes on un
   expect(screen.getByText('No clipping observed yet.')).toBeDefined();
   unmount();
   expect(dispose).toHaveBeenCalledTimes(1);
+});
+
+it('plays a Free-mode click at the selected BPM and the chosen recording-safe volume', async () => {
+  const start = vi.spyOn(PcmCapture.prototype, 'start').mockResolvedValue();
+  const { userEvent } = render(
+    <Recorder selection={{ mode: 'free', bpm: 96 }} onRecorded={vi.fn()} onUpload={vi.fn()} />,
+  );
+  fireEvent.change(screen.getByRole('slider', { name: /click volume/i }), { target: { value: '55' } });
+  act(() => callbacks.event({ type: 'armed' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Start recording' }));
+
+  expect(start).toHaveBeenCalledWith(null, { bpm: 96, beatsPerBar: 4, volume: 0.55 });
+  expect(screen.getByText('Recording click is running.')).toBeDefined();
+  expect(screen.queryByRole('button', { name: /mute warm-up/i })).toBeNull();
+  expect(screen.getByRole('slider', { name: /click volume/i }).getAttribute('min')).toBe('20');
+});
+
+it('offers a standalone warm-up click that can be muted', async () => {
+  class TestAudioContext {
+    resume = vi.fn().mockResolvedValue(undefined);
+    close = vi.fn().mockResolvedValue(undefined);
+  }
+  vi.stubGlobal('AudioContext', TestAudioContext);
+  const { userEvent } = render(
+    <Recorder selection={{ mode: 'reference', bpm: 90 }} onRecorded={vi.fn()} onUpload={vi.fn()} />,
+  );
+  expect(screen.getByRole('group', { name: 'Metronome · 90 BPM' })).toBeDefined();
+  await userEvent.click(screen.getByRole('button', { name: 'Start warm-up metronome' }));
+  expect(screen.getByText('Warm-up metronome is running.')).toBeDefined();
+  await userEvent.click(screen.getByRole('button', { name: 'Mute warm-up click' }));
+  expect(screen.getByRole('button', { name: 'Unmute warm-up click' })).toBeDefined();
+  expect(screen.getByText(/two-second lead-in and count-in/i)).toBeDefined();
+});
+
+it('surfaces an audio context startup failure', async () => {
+  class FailingAudioContext {
+    resume = vi.fn().mockRejectedValue(new Error('Audio playback is unavailable.'));
+    close = vi.fn().mockResolvedValue(undefined);
+  }
+  vi.stubGlobal('AudioContext', FailingAudioContext);
+  const { userEvent } = render(
+    <Recorder selection={{ mode: 'free', bpm: 80 }} onRecorded={vi.fn()} onUpload={vi.fn()} />,
+  );
+  await userEvent.click(screen.getByRole('button', { name: 'Start warm-up metronome' }));
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Audio playback is unavailable.'));
+});
+
+it('switches to processor input, persists the latency correction and explains headphone use', async () => {
+  const { userEvent } = render(<Recorder selection={{ mode: 'free', bpm: 80 }} onRecorded={vi.fn()} onUpload={vi.fn()} />);
+  expect(screen.queryByLabelText(/Latency correction/)).toBeNull();
+  await userEvent.click(screen.getByRole('radio', { name: 'Processor (USB)' }));
+  expect(screen.getByRole('heading', { name: /through your processor/ })).toBeDefined();
+  expect(screen.getByText(/Headphones are fine/)).toBeDefined();
+  fireEvent.change(screen.getByLabelText(/Latency correction/), { target: { value: '40' } });
+  expect(localStorage.getItem('coreguitar.inputKind')).toBe('direct');
+  expect(localStorage.getItem('coreguitar.latencyOffsetMs')).toBe('40');
+  await userEvent.click(screen.getByRole('radio', { name: 'Mic + amp' }));
+  expect(screen.getByText(/Use speakers, not headphones/)).toBeDefined();
+  localStorage.clear();
 });

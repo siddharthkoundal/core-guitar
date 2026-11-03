@@ -1,14 +1,20 @@
+import type { ReactNode } from "react";
 import type {
   AnalysisResult,
   Envelope,
   Evidence,
   Finding,
+  ToneCheck,
 } from "../../api/types";
 
 export type Seek = (evidence: Evidence) => void;
 
 export interface QualityPanelProps {
   envelope: Envelope;
+}
+
+export interface ToneCheckPanelProps {
+  tone: ToneCheck;
 }
 
 export interface NoteTableProps {
@@ -33,6 +39,7 @@ export interface PrioritiesProps {
 
 export interface ResultsProps {
   envelope: Envelope;
+  nextSteps?: ReactNode;
 }
 
 export interface NextStepsProps {

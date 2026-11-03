@@ -1,5 +1,7 @@
 import workletUrl from './pcm-recorder.worklet.ts?worker&url';
-import { ClickPlayer } from './clickPlayer';
+import { CLICK_LEAD_IN_S, ClickPlayer } from './clickPlayer';
+import { MetronomePlayer } from './metronome';
+import type { MetronomeBeat, MetronomeSettings } from './metronome';
 import { encodeWav } from './wav';
 import type { TrackSettings } from '../api/types';
 import type { RecorderEvent, RecorderState, Recording } from './types';
@@ -26,12 +28,14 @@ interface Callbacks {
   level: (level: number, peak: number, elapsed: number) => void;
   recorded: (recording: Recording) => void;
   error: (error: unknown) => void;
+  beat: (beat: MetronomeBeat) => void;
 }
 export class PcmCapture {
   private stream: MediaStream | null = null;
   private context: AudioContext | null = null;
   private node: AudioWorkletNode | null = null;
   private click: ClickPlayer | null = null;
+  private metronome: MetronomePlayer | null = null;
   private chunks: Float32Array[] = [];
   private capturing = false;
   private confirmed = false;
@@ -41,6 +45,9 @@ export class PcmCapture {
   private timers: number[] = [];
   private lastMeter = 0;
   private maxPeak = 0;
+  private clickVolume = 0.7;
+  private firstFrame: number | null = null;
+  private clickStart: number | null = null;
   constructor(private readonly callbacks: Callbacks) {}
 
   async arm(deviceId: string) {
@@ -82,8 +89,9 @@ export class PcmCapture {
     }
   }
 
-  async start(clickBlob: Promise<Blob> | null) {
+  async start(clickBlob: Promise<Blob> | null, settings: MetronomeSettings) {
     if (!this.stream) { this.callbacks.error(new Error('Enable a microphone before recording.')); return; }
+    this.clickVolume = settings.volume;
     const generation = this.generation;
     this.callbacks.event({ type: 'start' });
     this.context = new AudioContext();
@@ -99,9 +107,14 @@ export class PcmCapture {
       const source = context.createMediaStreamSource(this.stream);
       source.connect(this.node).connect(silence).connect(context.destination);
       this.chunks = []; this.samples = 0; this.maxPeak = 0; this.confirmed = false; this.capturing = true;
+      this.firstFrame = null; this.clickStart = null;
       context.onstatechange = () => { if (this.capturing && context.state !== 'running') this.interrupt(); };
       this.node.onprocessorerror = () => this.interrupt();
       this.node.port.onmessage = (event: MessageEvent<unknown>) => {
+        if (this.capturing && this.firstFrame === null && isFirstFrame(event.data)) {
+          this.firstFrame = event.data.firstFrame;
+          return;
+        }
         if (!this.capturing || !(event.data instanceof Float32Array)) return;
         const samples = event.data;
         this.chunks.push(samples); this.samples += samples.length;
@@ -112,8 +125,16 @@ export class PcmCapture {
           this.callbacks.event({ type: 'buffer' });
           if (clickBuffer) {
             this.click = new ClickPlayer(context, clickBuffer);
-            this.click.start(() => {
-              this.timers.push(window.setTimeout(() => this.stop(), 1000));
+            this.clickStart = this.click.start(settings.bpm, settings.beatsPerBar, this.clickVolume,
+              (beat, section) => this.callbacks.beat({ beat, section }), () => {
+                this.timers.push(window.setTimeout(() => this.stop(), 1000));
+              });
+          } else {
+            this.metronome = new MetronomePlayer(context);
+            this.metronome.start({ ...settings, volume: this.clickVolume }, {
+              leadInSeconds: 2,
+              countInBeats: settings.beatsPerBar,
+              onBeat: this.callbacks.beat,
             });
           }
           this.timers.push(window.setTimeout(() => this.stop(), 180000));
@@ -138,6 +159,12 @@ export class PcmCapture {
     }
   }
 
+  setClickVolume(volume: number) {
+    this.clickVolume = volume;
+    this.click?.setVolume(volume);
+    this.metronome?.setVolume(volume);
+  }
+
   stop(partial = false) {
     if (!this.capturing || !this.context) return;
     this.capturing = false;
@@ -145,9 +172,20 @@ export class PcmCapture {
       blob: new Blob([encodeWav(this.chunks, this.context.sampleRate)], { type: 'audio/wav' }),
       settings: this.settings, partial, source: 'recording', name: 'recording.wav',
     };
+    const offset = this.clickOffset(this.context);
+    if (offset !== null) recording.clickOffsetS = offset;
     this.callbacks.event({ type: 'recorded', partial });
     this.callbacks.recorded(recording);
     void this.dispose().catch(error => this.callbacks.error(error));
+  }
+  /** Where the first click lands on the recording's timeline: scheduled start minus the first captured frame,
+   * plus the click file's lead-in and browser-reported output and input latency. Used when the click isn't recorded. */
+  private clickOffset(context: AudioContext): number | null {
+    if (this.firstFrame === null || this.clickStart === null) return null;
+    const output = Number.isFinite(context.outputLatency) ? context.outputLatency : context.baseLatency;
+    const input = trackLatency(this.stream);
+    const offset = this.clickStart - this.firstFrame / context.sampleRate + CLICK_LEAD_IN_S + (output || 0) + input;
+    return Number.isFinite(offset) && offset >= 0 ? offset : null;
   }
   private interrupt() {
     this.callbacks.event({ type: 'interrupt' });
@@ -162,6 +200,7 @@ export class PcmCapture {
     this.generation++;
     this.capturing = false;
     this.click?.stop(); this.click = null;
+    this.metronome?.stop(); this.metronome = null;
     this.timers.forEach(timer => window.clearTimeout(timer)); this.timers = [];
     if (this.node) { this.node.port.onmessage = null; this.node.disconnect(); this.node = null; }
     this.stream?.getTracks().forEach(track => { track.onended = null; track.stop(); });
@@ -171,4 +210,15 @@ export class PcmCapture {
     this.context = null;
     if (context) { context.onstatechange = null; await context.close(); }
   }
+}
+
+function isFirstFrame(data: unknown): data is { firstFrame: number } {
+  return typeof data === 'object' && data !== null && 'firstFrame' in data
+    && typeof data.firstFrame === 'number' && Number.isFinite(data.firstFrame);
+}
+
+function trackLatency(stream: MediaStream | null): number {
+  const settings: object = stream?.getAudioTracks()[0]?.getSettings() ?? {};
+  const latency = 'latency' in settings ? settings.latency : undefined;
+  return typeof latency === 'number' && Number.isFinite(latency) && latency >= 0 && latency < 1 ? latency : 0;
 }

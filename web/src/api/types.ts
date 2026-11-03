@@ -38,6 +38,8 @@ export interface AnalysisRequest {
   custom_exercise?: CustomExercise;
   bpm?: number;
   tuning?: Tuning;
+  input_profile?: "mic" | "direct";
+  click_offset_s?: number;
 }
 
 export interface TrackSettings {
@@ -108,6 +110,23 @@ export interface ListeningPoint {
   evidence: Evidence;
 }
 
+export interface ToneTrait {
+  code: string;
+  label: string;
+  detail: string;
+  attention: boolean;
+}
+
+/** Experimental, uncalibrated description of the signal chain (drive, dynamics, brightness, noise, level). */
+export interface ToneCheck {
+  experimental: true;
+  input_profile: "mic" | "direct";
+  metrics: JsonObject;
+  traits: ToneTrait[];
+  advice: string[];
+  caveat: string;
+}
+
 export interface AnalysisResult {
   mode: "reference" | "free";
   quality: {
@@ -123,6 +142,8 @@ export interface AnalysisResult {
   priorities: Priority[];
   listening_points: ListeningPoint[];
   uncertainty: string[];
+  /** Absent in analyses saved before the tone check existed; null when the take was too short or silent. */
+  tone?: ToneCheck | null;
 }
 
 export interface Envelope {
@@ -139,3 +160,31 @@ export type AnalysisStatus =
   | { status: "queued" | "running" | "cancelled" }
   | { status: "failed"; error: string }
   | { status: "done"; result: Envelope };
+
+export interface GuitarProTrack {
+  index: number;
+  name: string;
+  strings: number;
+  tuning: Tuning | null;
+  percussion: boolean;
+}
+export interface GuitarProImportOptions {
+  track?: number;
+  start?: number;
+  end?: number;
+  tempo_percent?: number;
+}
+export interface GuitarProImport {
+  title: string;
+  artist: string;
+  source_bpm: number;
+  tracks: GuitarProTrack[];
+  track: number;
+  measure_count: number;
+  start: number;
+  end: number;
+  exercise: CustomExercise;
+  warnings: string[];
+  total_beats: number;
+  note_count: number;
+}

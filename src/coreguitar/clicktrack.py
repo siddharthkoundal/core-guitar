@@ -4,6 +4,8 @@ Contract: the click WAV is LEAD_SILENCE_S of silence, one bar of count-in
 clicks, then clicks continuing through the exercise plus one bar, then a
 tail. Start recording BEFORE pressing play on the click track; the analyser
 finds the clicks inside the recording, so playback latency doesn't matter.
+With direct (USB processor) input the click isn't recorded, so the browser
+supplies the click offset and `known_grid` builds the grid instead.
 """
 
 from __future__ import annotations
@@ -105,6 +107,22 @@ def detect_clicks(y: np.ndarray, bpm: float, sr: int = SR, min_clicks: int = 4) 
         first_click_s=first,
         clicks_s=[float(t) for t in inliers],
         residual_ms=resid * 1000,
+    )
+
+
+def known_grid(bpm: float, first_click_s: float, duration_s: float) -> ClickGrid:
+    """Grid for direct (USB processor) input, where the speaker click never reaches the recording.
+    The browser measures when the first click played relative to the first recorded sample."""
+    period = 60.0 / bpm
+    n = max(0, int((duration_s - first_click_s) / period) + 1)
+    return ClickGrid(
+        True,
+        bpm,
+        bpm_measured=bpm,
+        period_s=period,
+        first_click_s=first_click_s,
+        clicks_s=[first_click_s + k * period for k in range(n)],
+        reason="direct input: click time measured on the browser audio clock",
     )
 
 

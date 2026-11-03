@@ -16,7 +16,7 @@ pytest.importorskip("httpx", reason="Install .[app,dev] to run optional server t
 from fastapi.testclient import TestClient
 
 from coreguitar.server.app import create_app
-from coreguitar.synth import render_take
+from coreguitar.synth import TakeSpec, render_take
 
 
 @pytest.fixture
@@ -87,6 +87,39 @@ def test_upload_analyze_envelope_and_range(client, chromatic):
     assert client.get(f"/api/analyses/{response.json()['analysis_id']}").status_code == 404
 
 
+def test_demo_take_round_trips_to_a_late_note_finding(client):
+    demo = client.post("/api/demo-take", json={"exercise_id": "chromatic_1234"})
+    assert demo.status_code == 200 and demo.content[:4] == b"RIFF"
+    assert sf.info(io.BytesIO(demo.content)).subtype == "PCM_16"
+    take = client.post("/api/takes", files={"file": ("demo-take.wav", demo.content)},
+                       data={"meta": json.dumps({"source": "upload", "original_name": "demo-take.wav"})})
+    assert take.status_code == 201
+    response = client.post(f"/api/takes/{take.json()['take_id']}/analyses",
+                           json={"mode": "reference", "exercise_id": "chromatic_1234"})
+    job = wait_for(client, response.json()["analysis_id"])
+    assert job["status"] == "done", job
+    result = job["result"]["result"]
+    assert result["quality"]["verdict"] == "ok"
+    assert [f["type"] for f in result["findings"] if f["confidence"] >= 0.6] == ["timing_late"]
+    assert client.post("/api/demo-take", json={}).status_code == 422
+
+
+def test_direct_profile_request_reaches_the_engine(client, chromatic):
+    audio, _ = render_take(chromatic, TakeSpec(click_level=0.0, snr_db=70.0, reverb=False))
+    take = upload(client, audio).json()
+    response = client.post(f"/api/takes/{take['take_id']}/analyses",
+                           json={"mode": "reference", "exercise_id": "chromatic_1234",
+                                 "input_profile": "direct", "click_offset_s": 2.0})
+    assert response.status_code == 202
+    job = wait_for(client, response.json()["analysis_id"])
+    assert job["status"] == "done", job
+    result = job["result"]["result"]
+    assert result["input"]["profile"] == "direct"
+    assert result["quality"]["verdict"] == "ok"
+    assert "browser audio clock" in result["click_grid"]["reason"]
+    assert result["tone"]["input_profile"] == "direct"
+
+
 def test_invalid_uuid_host_origin_and_overrides(client):
     assert client.get("/api/takes/not-a-uuid/audio").status_code == 422
     assert client.get(f"/api/takes/{uuid.uuid4()}/audio").status_code == 404
@@ -101,6 +134,10 @@ def test_invalid_uuid_host_origin_and_overrides(client):
         {"mode": "reference"},
         {"mode": "free", "bpm": 0},
         {"mode": "reference", "exercise_id": "../chromatic_1234"},
+        {"mode": "free", "input_profile": "usb"},
+        {"mode": "free", "click_offset_s": 2.0},
+        {"mode": "free", "bpm": 80, "click_offset_s": -1},
+        {"mode": "free", "bpm": 80, "click_offset_s": 61},
     ]:
         assert client.post(f"/api/takes/{take['take_id']}/analyses", json=request).status_code == 422
 

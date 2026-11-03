@@ -1,6 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { api, errorMessage } from '../api';
 import type { AnalysisRequest, Take } from '../api/types';
+import { loadInputProfile } from '../audio/inputProfile';
 import type { Recording } from '../audio/types';
 import { initialSession, sessionReducer } from './session';
 import type { CaptureMethod } from './types';
@@ -23,6 +24,19 @@ function delay(signal: AbortSignal): Promise<void> {
     signal.addEventListener('abort', abort, { once: true });
     if (signal.aborted) abort();
   });
+}
+
+/** Processor (direct) takes carry the browser-measured click time, since the click isn't in the audio. */
+export function withInputProfile(selection: AnalysisRequest, recording: Recording): AnalysisRequest {
+  const inputProfile = recording.inputProfile ?? loadInputProfile().kind;
+  const offset = recording.clickOffsetS;
+  const timed = selection.mode === 'reference' || selection.bpm !== undefined;
+  return {
+    ...selection,
+    input_profile: inputProfile,
+    ...(inputProfile === 'direct' && timed && offset !== undefined && offset >= 0 && offset <= 60
+      ? { click_offset_s: Math.round(offset * 10000) / 10000 } : {}),
+  };
 }
 
 export function usePracticeSession() {
@@ -58,33 +72,43 @@ export function usePracticeSession() {
     dispatch({ type: 'pick' });
   }
 
-  async function submit() {
-    if (!recording || !session.selection || active.current) return;
+  /** Submits the current recording, or (with `demoSelection`) a generated demo take of that exercise. */
+  async function submit(demoSelection?: AnalysisRequest) {
+    const selection = demoSelection ?? session.selection;
+    if ((!recording && !demoSelection) || !selection || active.current) return;
     const operation: Operation = {
       controller: new AbortController(),
       analysisId: null,
     };
     active.current = operation;
+    if (demoSelection) dispatch({ type: 'select', selection: demoSelection });
     dispatch({ type: 'upload' });
 
     try {
-      let take = uploaded.current?.recording === recording ? uploaded.current.take : null;
+      let current = demoSelection ? null : recording;
+      if (!current) {
+        const blob = await api.demoTake(selection, operation.controller.signal);
+        if (operation.controller.signal.aborted) return;
+        current = { blob, name: 'demo-take.wav', source: 'upload', partial: false, settings: {}, inputProfile: 'mic' };
+        setRecording(current);
+      }
+      let take = uploaded.current?.recording === current ? uploaded.current.take : null;
       if (!take) {
         dispatch({ type: 'validating' });
-        take = await api.upload(recording.blob, {
-          source: recording.source,
-          client_mime: recording.blob.type,
-          original_name: recording.name,
-          track_settings: recording.settings,
-          interrupted: recording.partial,
+        take = await api.upload(current.blob, {
+          source: current.source,
+          client_mime: current.blob.type,
+          original_name: current.name,
+          track_settings: current.settings,
+          interrupted: current.partial,
         }, operation.controller.signal);
         if (operation.controller.signal.aborted) return;
-        uploaded.current = { recording, take };
+        uploaded.current = { recording: current, take };
         dispatch({ type: 'validated', take });
       }
 
       // Keep the creation reply so an analysis created during cancellation can be stopped.
-      const analysis = await api.analyze(take.take_id, session.selection);
+      const analysis = await api.analyze(take.take_id, withInputProfile(selection, current));
       operation.analysisId = analysis.analysis_id;
       if (operation.controller.signal.aborted) {
         await api.cancel(analysis.analysis_id)
@@ -152,6 +176,8 @@ export function usePracticeSession() {
     session, method, recording,
     busy: session.phase === 'uploading' || session.phase === 'validating' || session.phase === 'analyzing',
     bpm: session.selection?.bpm ?? 80,
-    setMethod, setRecording, select, discard, pick, submit, cancel, retry, remove,
+    setMethod, setRecording, select, discard, pick, cancel, retry, remove,
+    submit: () => submit(),
+    demo: (selection: AnalysisRequest) => submit(selection),
   };
 }

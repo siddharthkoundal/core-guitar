@@ -4,7 +4,8 @@
   "input": {
     "file": "wrong.wav",
     "duration_s": 18.5,
-    "native_sample_rate": 44100
+    "native_sample_rate": 44100,
+    "profile": "mic"
   },
   "mode": "reference",
   "exercise": {
@@ -287,6 +288,19 @@
     "experimental_confidence_cap": 0.4,
     "ringing_rel_db": -10.0,
     "buzz_excess_db": 6.0,
+    "tone_level_hot_dbfs": -1.0,
+    "tone_level_low_dbfs": -30.0,
+    "tone_drive_light_ratio_db": -10.0,
+    "tone_drive_heavy_ratio_db": -8.0,
+    "tone_drive_light_crest_db": 9.0,
+    "tone_drive_heavy_crest_db": 6.0,
+    "tone_drive_heavy_decay_db": 1.0,
+    "tone_compressed_crest_db": 9.0,
+    "tone_compressed_attack_spread_db": 1.5,
+    "tone_bright_centroid_hz": 2500.0,
+    "tone_dark_centroid_hz": 700.0,
+    "tone_gate_floor_dbfs": -85.0,
+    "tone_hum_prominence_db": 15.0,
     "max_priorities": 3,
     "min_priority_confidence": 0.5
   },
@@ -1157,6 +1171,50 @@
     "Timing measurement uncertainty (10 ms) is a placeholder until M0 calibration; deviations between 20 and 30 ms are reported with low confidence.",
     "Ringing and buzz detectors are experimental and unvalidated; treat them as 'worth a listen', not facts."
   ],
+  "tone": {
+    "experimental": true,
+    "input_profile": "mic",
+    "metrics": {
+      "peak_dbfs": -3.1,
+      "active_rms_dbfs": -16.7,
+      "crest_db": 13.6,
+      "noise_floor_dbfs": -73.3,
+      "centroid_hz": 369,
+      "harmonic_ratio_db": -15.0,
+      "attack_spread_db": 2.0,
+      "decay_db_200ms": 3.2,
+      "hum_hz": null,
+      "notes_measured": 24
+    },
+    "traits": [
+      {
+        "code": "level_ok",
+        "label": "Level: healthy",
+        "detail": "Peaks reach -3.1 dBFS with headroom.",
+        "attention": false
+      },
+      {
+        "code": "drive_clean",
+        "label": "Drive: clean or edge-of-breakup",
+        "detail": "Upper harmonics are -15 dB relative to the first four; peak-to-average 14 dB, 3.2 dB decay in 200 ms.",
+        "attention": false
+      },
+      {
+        "code": "dynamic",
+        "label": "Dynamics: open",
+        "detail": "Peak-to-average ratio is 14 dB; note attacks vary by 2.0 dB.",
+        "attention": false
+      },
+      {
+        "code": "dark",
+        "label": "Brightness: dark",
+        "detail": "Spectral centroid is about 369 Hz.",
+        "attention": false
+      }
+    ],
+    "advice": [],
+    "caveat": "Tone check labels are uncalibrated heuristics from signal measurements. They describe this recording, not your pedal settings, and they are not a quality score."
+  },
   "quality": {
     "verdict": "ok",
     "issues": [],

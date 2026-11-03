@@ -1,0 +1,82 @@
+.coach {
+  display: grid;
+  gap: 1.6rem;
+  max-width: 76rem;
+  margin-inline: auto;
+}
+
+.coach-header {
+  max-width: 65ch;
+}
+
+.coach-header h2 {
+  font-size: clamp(1.7rem, 3.5vw, 2.8rem);
+  line-height: 1.12;
+  margin-block: .4rem 1rem;
+}
+
+.coach-setup {
+  border-inline-start: .25rem solid var(--accent, #755c39);
+  padding: .5rem 1.2rem 1rem;
+  background: var(--surface, transparent);
+}
+
+.coach-form {
+  display: grid;
+  gap: .65rem;
+  max-width: 60ch;
+}
+
+.coach-form textarea {
+  resize: vertical;
+  max-width: 100%;
+  min-width: 0;
+  font: inherit;
+}
+
+.coach-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .65rem;
+}
+
+.coach button,
+.coach summary,
+.coach select {
+  min-height: 44px;
+}
+
+.coach summary {
+  cursor: pointer;
+  padding-block: .65rem;
+}
+
+.coach :focus-visible {
+  outline: 3px solid currentColor;
+  outline-offset: 3px;
+}
+
+.coach-answer {
+  border-block-start: 1px solid currentColor;
+  padding-block-start: 1.5rem;
+}
+
+.coach-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.65;
+  max-width: 76ch;
+  margin-block: .7rem 1.4rem;
+}
+
+.coach-saved li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .6rem;
+  margin-block: .65rem;
+}
+
+.coach-error {
+  border-inline-start: .25rem solid currentColor;
+  padding-inline-start: .8rem;
+}
