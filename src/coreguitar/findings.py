@@ -3,6 +3,7 @@ measured values, a time range (audio evidence) and a confidence."""
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field, replace
 
 import numpy as np
@@ -108,6 +109,98 @@ def _detrend_by_pitch(vals: np.ndarray, midi: np.ndarray) -> np.ndarray:
     return vals
 
 
+def _allow_scale_peak_repeat(ex: Exercise, notes: list[Note], ops: list[Op]) -> None:
+    """Treat one repeated summit note as an optional scale turnaround."""
+    if len(ex.notes) < 3:
+        return
+    peak = max(range(len(ex.notes)), key=lambda i: ex.notes[i].midi)
+    if peak == 0 or peak == len(ex.notes) - 1:
+        return
+    if not all(ex.notes[i].midi < ex.notes[i + 1].midi for i in range(peak)):
+        return
+    if not all(ex.notes[i].midi > ex.notes[i + 1].midi for i in range(peak, len(ex.notes) - 1)):
+        return
+    summit = next((o for o in ops if o.kind == "match" and o.ref == peak and o.det is not None), None)
+    descent = next((o for o in ops if o.ref == peak + 1 and o.det is not None), None)
+    if summit is None or descent is None:
+        return
+    for op in ops:
+        if (op.kind == "extra" and op.det is not None
+                and notes[op.det].midi == ex.notes[peak].midi
+                and summit.det < op.det < descent.det):
+            op.kind = "optional_repeat"
+            op.ref = peak
+            return
+
+
+def _note_value_name(denominator: float) -> str:
+    values = {1: "whole", 2: "half", 4: "quarter", 8: "eighth", 16: "sixteenth", 32: "thirty-second"}
+    nearest = min(values, key=lambda value: abs(value - denominator))
+    return f"{values[nearest]} notes" if abs(nearest - denominator) < 0.15 else "subdivisions"
+
+
+def _per_click_text(value: float) -> str:
+    return str(int(round(value))) if abs(value - round(value)) < 0.05 else f"{value:.1f}"
+
+
+def _rhythm_mismatch(F: Findings, ex: Exercise, grid: ClickGrid, notes: list[Note], ops: list[Op],
+                     ref_t: list[float], qf: float, th: Thresholds) -> bool:
+    pairs = [o for o in ops if o.kind == "match" and o.ref is not None and o.det is not None]
+    intervals: list[tuple[float, float, Op, Op]] = []
+    for previous, current in zip(pairs, pairs[1:]):
+        if current.ref == previous.ref + 1:
+            expected = ref_t[current.ref] - ref_t[previous.ref]
+            played = notes[current.det].onset_s - notes[previous.det].onset_s
+            if expected > 0 and played > 0:
+                intervals.append((played / expected, expected, previous, current))
+    if len(intervals) < th.rhythm_min_pairs:
+        return False
+    ratios = np.array([item[0] for item in intervals])
+    for factor in (2.0, 0.5):
+        consistent = np.abs(ratios - factor) <= factor * th.rhythm_ratio_tolerance
+        if float(consistent.mean()) < th.rhythm_min_consistency:
+            continue
+        selected = [item for item, keep in zip(intervals, consistent) if keep]
+        ratio = float(np.median([item[0] for item in selected]))
+        expected_clicks = float(np.median([item[1] / grid.period_s for item in selected]))
+        played_clicks = expected_clicks * ratio
+        if played_clicks <= 0:
+            return False
+        expected_name = _note_value_name(ex.beat_unit / expected_clicks)
+        played_name = _note_value_name(ex.beat_unit / played_clicks)
+        first, last = selected[0][2], selected[-1][3]
+        expected_count = 1 / expected_clicks
+        played_count = 1 / played_clicks
+        displayed_expected = _per_click_text(expected_count)
+        displayed_played = _per_click_text(played_count)
+        expected_plural = "" if abs(expected_count - 1) < 0.05 else "s"
+        played_plural = "" if abs(played_count - 1) < 0.05 else "s"
+        selected_refs = list(dict.fromkeys(o.ref for item in selected for o in item[2:]))
+        selected_dets = list(dict.fromkeys(o.det for item in selected for o in item[2:]))
+        F.add(
+            "rhythm_mismatch",
+            "timing",
+            0.9,
+            float(np.mean([notes[o.det].confidence for item in selected for o in item[2:]]) * qf),
+            notes[first.det].onset_s,
+            notes[last.det].offset_s,
+            f"You played {played_name} ({displayed_played} note{played_plural} per click), "
+            f"but this passage is written in {expected_name} "
+            f"({displayed_expected} note{expected_plural} per click).",
+            measured={
+                "played_to_expected_ioi_ratio": round(ratio, 3),
+                "consistent_intervals": int(consistent.sum()),
+                "intervals_checked": len(intervals),
+                "played_notes_per_click": round(1 / played_clicks, 2),
+                "expected_notes_per_click": round(1 / expected_clicks, 2),
+            },
+            ref_indices=selected_refs,
+            det_indices=selected_dets,
+        )
+        return True
+    return False
+
+
 def analyze_reference(ex: Exercise, grid: ClickGrid, notes: list[Note], quality: Quality, th: Thresholds,
                       yg: np.ndarray, sr: int, audio_dur: float) -> tuple[Findings, list[dict], dict]:
     F = Findings()
@@ -157,22 +250,27 @@ def analyze_reference(ex: Exercise, grid: ClickGrid, notes: list[Note], quality:
                       measured={"median_offset_cents": round(off * 100, 1), "paired_notes": cnt})
     if offset_used:
         ops = align(ref_midi, ref_t, det_mf, det_t, det_c, beat, offset_used)
+    _allow_scale_peak_repeat(ex, notes, ops)
 
     rows = _note_rows(ex, notes, ops, ref_t, offset_used)
     _note_findings(F, ex, notes, ops, ref_t, fast, qf, offset_used)
     timing = _timing_findings(F, ex, grid, notes, ops, ref_t, fast, qf, th)
     _pitch_dynamics_findings(F, ex, notes, ops, ref_t, qf, th, offset_used)
-    _experimental_findings(F, yg, sr, notes, ex.tuning, th, ops, ex)
+    _experimental_findings(F, yg, sr, notes, ex.tuning, th, ops, ex, qf=qf)
 
-    counts = {k: sum(1 for o in ops if o.kind == k) for k in ("match", "wrong", "octave", "unpitched", "missed", "extra")}
+    counts = {
+        k: sum(1 for o in ops if o.kind == k)
+        for k in ("match", "wrong", "octave", "unpitched", "missed", "extra", "optional_repeat")
+    }
     summary = {
         "notes_expected": len(ex.notes),
         "notes_detected": len(notes),
         "alignment": counts,
-        "note_accuracy": round(counts["match"] / len(ex.notes), 3),
+        "note_accuracy": round(min(1.0, (counts["match"] + counts["optional_repeat"]) / len(ex.notes)), 3),
         "tuning_offset_cents": round(offset_used * 100, 1),
         **timing,
     }
+    F.items = [finding for finding in F.items if finding.confidence >= th.min_finding_confidence]
     return F, rows, summary
 
 
@@ -245,7 +343,41 @@ def _note_findings(F, ex, notes, ops, ref_t, fast, qf, offset):
 
 
 def _timing_findings(F, ex, grid, notes, ops, ref_t, fast, qf, th) -> dict:
-    pairs = [o for o in ops if o.ref is not None and o.det is not None]
+    count_in_note = None
+    count_in_indices: set[int] = set()
+    if grid.found and grid.first_click_s is not None and grid.period_s is not None:
+        exercise_start = grid.beat_time(ex.beats_per_bar)
+        count_in_end = exercise_start - th.count_in_timing_tolerance_ms / 1000
+        count_in_indices = {
+            n.index for n in notes if grid.first_click_s <= n.onset_s < count_in_end
+        }
+        count_in_note = next(
+            (
+                n for n in notes
+                if n.index in count_in_indices
+                and n.midi is not None and n.confidence * qf >= th.min_finding_confidence
+            ),
+            None,
+        )
+        if count_in_note is not None:
+            F.add(
+                "started_during_count_in",
+                "timing",
+                1.0,
+                0.8 * count_in_note.confidence * qf,
+                count_in_note.onset_s,
+                exercise_start,
+                f"A note was detected during the {ex.beats_per_bar}-click count-in, before the exercise starts.",
+                measured={
+                    "note_onset_s": round(count_in_note.onset_s, 3),
+                    "exercise_start_s": round(exercise_start, 3),
+                    "beats_before_start": round((exercise_start - count_in_note.onset_s) / grid.period_s, 2),
+                },
+                ref_indices=[0],
+                det_indices=[count_in_note.index],
+            )
+    timing_ops = [o for o in ops if o.det is None or o.det not in count_in_indices]
+    pairs = [o for o in timing_ops if o.kind != "optional_repeat" and o.ref is not None and o.det is not None]
     if len(pairs) < 3:
         F.note("Too few matched notes to assess timing.")
         return {"timing": None}
@@ -265,14 +397,27 @@ def _timing_findings(F, ex, grid, notes, ops, ref_t, fast, qf, th) -> dict:
             "assumed_measurement_uncertainty_ms": unc,
         }
     }
-    med = float(np.median(dev))
-    if abs(med) > 0.4 * beat_ms:
-        F.add("timing_offset", "timing", 1.0, 0.8 * qf, t[0], t[-1],
-              f"The whole take is shifted by about {med / beat_ms:+.1f} beats against the click. "
-              f"Did you start {'late' if med > 0 else 'early'}? The count-in is {ex.beats_per_bar} clicks; start on the next one.",
-              measured={"median_ms": round(med, 1), "beats": round(med / beat_ms, 2)})
-        resid = dev - med
-        med = 0.0
+    if _rhythm_mismatch(F, ex, grid, notes, timing_ops, ref_t, qf, th):
+        return stats
+
+    start_dev = float(dev[0])
+    baseline = 0.0
+    if abs(start_dev) > 0.4 * beat_ms:
+        baseline = start_dev
+        F.add(
+            "timing_offset",
+            "timing",
+            1.0,
+            0.8 * qf,
+            t[0],
+            t[-1],
+            f"The first matched note landed about {abs(start_dev / beat_ms):.1f} beats "
+            f"{'late' if start_dev > 0 else 'early'} against its reference beat.",
+            measured={"first_matched_note_offset_ms": round(start_dev, 1),
+                      "beats": round(start_dev / beat_ms, 2)},
+        )
+        resid = dev - baseline
+    med = float(np.median(resid))
 
     trend = None
     if len(pairs) >= th.drift_min_notes:
@@ -295,14 +440,16 @@ def _timing_findings(F, ex, grid, notes, ops, ref_t, fast, qf, th) -> dict:
                           "r2": round(r2, 2), "played_bpm": round(played_bpm, 1)},
             )
             resid = resid - fit
-    if trend is None and abs(med) >= tol and np.mean(np.sign(dev) == np.sign(med)) >= 0.75:
+            F.items = [f for f in F.items if f.type != "timing_offset"]
+    if trend is None and abs(med) >= tol and np.mean(np.sign(resid) == np.sign(med)) >= 0.75:
         F.add("timing_offset", "timing", min(1.0, abs(med) / (3 * tol)), (0.85 if abs(med) >= tol + unc else 0.5) * qf,
               t[0], t[-1],
               f"Notes are consistently {'behind' if med > 0 else 'ahead of'} the click by about {abs(med):.0f} ms.",
               measured={"median_ms": round(med, 1)})
         resid = resid - med
 
-    flagged = [(o.ref, float(r)) for o, r in zip(pairs, resid) if abs(r) >= tol]
+    flagged = ([] if trend is not None else
+                [(o.ref, float(r)) for o, r in zip(pairs, resid) if abs(r) >= tol])
     det_of = {o.ref: o.det for o in pairs}
     for run in _runs(flagged):
         idx = [i for i, _ in run]
@@ -336,10 +483,60 @@ def _timing_findings(F, ex, grid, notes, ops, ref_t, fast, qf, th) -> dict:
 
 def _pitch_dynamics_findings(F, ex, notes, ops, ref_t, qf, th, offset):
     matched = [o for o in ops if o.kind == "match"]
+    string_groups: dict[int, list[tuple[Op, float]]] = {}
+    for o in matched:
+        if o.ref is None or o.det is None:
+            continue
+        token = ex.notes[o.ref].token.partition(":")[0]
+        match = re.match(r"^([1-6])/", token)
+        d = notes[o.det]
+        if match and d.midi_float is not None and d.duration_s >= 0.15:
+            string_groups.setdefault(int(match.group(1)), []).append(
+                (o, (d.midi_float - offset - ex.notes[o.ref].midi) * 100)
+            )
+    classified_strings: set[int] = set()
+    all_string_deviations = [
+        cents for values in string_groups.values() for _, cents in values
+    ]
+    take_median = float(np.median(all_string_deviations)) if all_string_deviations else 0.0
+    for string, values in string_groups.items():
+        if (len(values) < th.string_tuning_min_notes
+                or len(all_string_deviations) - len(values) < th.string_tuning_min_notes
+                or len(values) * 2 >= len(all_string_deviations)):
+            continue
+        group_cents = np.array([cents for _, cents in values])
+        deviation = float(np.median(group_cents) - take_median)
+        if (abs(deviation) < th.string_tuning_report_cents
+                or float(np.ptp(group_cents)) > th.string_tuning_max_spread_cents):
+            continue
+        classified_strings.update(o.ref for o, _ in values if o.ref is not None)
+        F.add(
+            "string_tuning",
+            "tuning",
+            0.9,
+            0.7 * float(np.mean([notes[o.det].confidence for o, _ in values])) * qf,
+            notes[values[0][0].det].onset_s,
+            notes[values[-1][0].det].offset_s,
+            f"Notes on the {string}{'th' if string not in (1, 2, 3) else {1: 'st', 2: 'nd', 3: 'rd'}[string]} "
+            f"string measure about {abs(deviation):.0f} cents {'flat' if deviation < 0 else 'sharp'} "
+            f"relative to the other played strings ({len(values)} notes).",
+            measured={
+                "string": string,
+                "difference_from_other_strings_cents": round(deviation, 1),
+                "string_median_cents": round(float(np.median(group_cents)), 1),
+                "other_strings_median_cents": round(take_median, 1),
+                "notes": len(values),
+            },
+            ref_indices=[o.ref for o, _ in values if o.ref is not None],
+            det_indices=[o.det for o, _ in values if o.det is not None],
+        )
+
     off = []
     for o in matched:
         d = notes[o.det]
         if d.duration_s < 0.15 or d.midi_float is None:
+            continue
+        if o.ref in classified_strings:
             continue
         c = (d.midi_float - offset - ex.notes[o.ref].midi) * 100
         if abs(c) >= th.note_intonation_cents:
@@ -406,26 +603,28 @@ def _pitch_dynamics_findings(F, ex, notes, ops, ref_t, qf, th, offset):
               ref_indices=[o.ref for o, _, _ in short], det_indices=[o.det for o, _, _ in short])
 
 
-def _experimental_findings(F, yg, sr, notes, tuning, th, ops=None, ex=None, neutral=False):
+def _experimental_findings(F, yg, sr, notes, tuning, th, ops=None, ex=None, neutral=False, qf=1.0):
     cap = th.experimental_confidence_cap
+    reliable_notes = [n for n in notes if n.confidence * qf >= th.min_finding_confidence]
     ref_of = {o.det: o.ref for o in (ops or []) if o.det is not None}
-    for r in experimental.ringing(yg, sr, notes, tuning, th.ringing_rel_db):
+    for r in experimental.ringing(yg, sr, reliable_notes, tuning, th.ringing_rel_db):
         n = r["note"]
-        F.add("possible_ringing", "experimental", 0.4, cap, n.onset_s, min(n.offset_s, n.onset_s + 0.4),
+        F.add("possible_ringing", "experimental", 0.4, cap * qf, n.onset_s, min(n.offset_s, n.onset_s + 0.4),
               f"At {ts(n.onset_s)} ({n.name}), {r['ringing_name']} ({r['source']}) seems to keep sounding underneath "
               f"({r['rel_db']:+.0f} dB relative)." + ("" if not neutral else " This may be intentional."),
               measured={"rel_db": r["rel_db"], "ringing": r["ringing_name"], "source": r["source"]},
               det_indices=[n.index], ref_indices=[ref_of[n.index]] if ref_of.get(n.index) is not None else [],
               experimental=True)
-    for b in experimental.buzz(yg, sr, notes, th.buzz_excess_db):
+    for b in experimental.buzz(yg, sr, reliable_notes, th.buzz_excess_db):
         n = b["note"]
-        F.add("possible_buzz", "experimental", 0.4, cap, n.onset_s, min(n.offset_s, n.onset_s + 0.3),
+        F.add("possible_buzz", "experimental", 0.4, cap * qf, n.onset_s, min(n.offset_s, n.onset_s + 0.3),
               f"At {ts(n.onset_s)} ({n.name}) there is extra noisy energy in the 1.5-3 kHz range compared with your "
               f"other notes ({b['excess_db']:+.0f} dB). This can be fret buzz.",
               measured={"inharmonic_db": b["inharmonic_db"], "excess_db": b["excess_db"]},
               det_indices=[n.index], ref_indices=[ref_of[n.index]] if ref_of.get(n.index) is not None else [],
               experimental=True)
-    F.note("Ringing and buzz detectors are experimental and unvalidated; treat them as 'worth a listen', not facts.")
+    if reliable_notes:
+        F.note("Ringing and buzz detectors are experimental and unvalidated; treat them as 'worth a listen', not facts.")
 
 
 # ---------------------------------------------------------------------------
@@ -435,6 +634,7 @@ def _experimental_findings(F, yg, sr, notes, tuning, th, ops=None, ex=None, neut
 def analyze_free(notes: list[Note], grid: ClickGrid | None, quality: Quality, th: Thresholds,
                  yg: np.ndarray, sr: int, tuning: str) -> tuple[Findings, dict]:
     F = Findings()
+    qf = quality.confidence_factor(th)
     pitched = [n for n in notes if n.midi is not None]
     on = np.array([n.onset_s for n in notes])
     desc: dict = {"notes_detected": len(notes), "pitched_notes": len(pitched)}
@@ -446,7 +646,7 @@ def analyze_free(notes: list[Note], grid: ClickGrid | None, quality: Quality, th
             pcs[k] = pcs.get(k, 0) + 1
         desc["range"] = {"lowest": lo.name, "highest": hi.name, "semitones": hi.midi - lo.midi}
         desc["most_used_notes"] = sorted(pcs.items(), key=lambda kv: -kv[1])[:6]
-        F.add("description_range", "description", 0, 0.8, on[0], notes[-1].offset_s,
+        F.add("description_range", "description", 0, 0.8 * qf, on[0], notes[-1].offset_s,
               f"You played {len(pitched)} pitched notes from {lo.name} to {hi.name}; most used: "
               + ", ".join(f"{k} ({v})" for k, v in desc["most_used_notes"]) + ".", measured=desc["range"])
     if len(on) >= 3:
@@ -457,7 +657,7 @@ def analyze_free(notes: list[Note], grid: ClickGrid | None, quality: Quality, th
         desc["gap_variation_cv"] = round(float(ioi.std() / ioi.mean()), 2)
         pauses = [(on[i], ioi[i]) for i in range(len(ioi)) if ioi[i] > max(0.6, 3 * np.median(ioi))]
         desc["pauses"] = [{"at_s": round(float(a), 2), "length_s": round(float(b), 2)} for a, b in pauses]
-        F.add("description_rhythm", "description", 0, 0.7, on[0], notes[-1].offset_s,
+        F.add("description_rhythm", "description", 0, 0.7 * qf, on[0], notes[-1].offset_s,
               f"About {desc['notes_per_second']} notes per second; typical gap between notes {desc['median_gap_ms']} ms "
               f"(variation {desc['gap_variation_cv']:.2f}, where 0 is perfectly even). "
               + (f"{len(pauses)} longer pause{'s' if len(pauses) != 1 else ''}." if pauses else "No long pauses."),
@@ -468,16 +668,17 @@ def analyze_free(notes: list[Note], grid: ClickGrid | None, quality: Quality, th
             dev = (phase - np.round(phase)) * sub * 1000
             desc["click_alignment"] = {"within_20ms_of_eighth_grid_pct": round(float(np.mean(np.abs(dev) < 20) * 100), 1),
                                        "mean_abs_ms": round(float(np.abs(dev).mean()), 1)}
-            F.add("description_click", "description", 0, 0.6, on[0], notes[-1].offset_s,
+            F.add("description_click", "description", 0, 0.6 * qf, on[0], notes[-1].offset_s,
                   f"{desc['click_alignment']['within_20ms_of_eighth_grid_pct']:.0f}% of attacks fall within 20 ms of an "
                   "eighth-note position of the click (descriptive only; off-grid notes may be intentional).",
                   measured=desc["click_alignment"])
     att = np.array([n.attack_db for n in pitched if np.isfinite(n.attack_db)])
     if len(att) >= 4:
         desc["dynamics"] = {"attack_range_db": round(float(np.ptp(att)), 1), "attack_std_db": round(float(att.std()), 1)}
-        F.add("description_dynamics", "description", 0, 0.6, on[0], notes[-1].offset_s,
+        F.add("description_dynamics", "description", 0, 0.6 * qf, on[0], notes[-1].offset_s,
               f"Note volumes span about {np.ptp(att):.0f} dB (spread {att.std():.1f} dB).",
               measured=desc["dynamics"])
-    _experimental_findings(F, yg, sr, notes, tuning, th, neutral=True)
+    _experimental_findings(F, yg, sr, notes, tuning, th, neutral=True, qf=qf)
     F.note("Free-playing mode has no reference, so it describes what was played and never labels notes or timing as mistakes.")
+    F.items = [finding for finding in F.items if finding.confidence >= th.min_finding_confidence]
     return F, desc

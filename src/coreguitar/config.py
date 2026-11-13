@@ -38,10 +38,28 @@ class Thresholds:
     drift_min_r2: float = 0.5
     drift_min_notes: int = 6
     min_reliable_ioi_s: float = 0.09
+    # These ratios identify a steady half-time or double-time interpretation, not a gradual drift.
+    rhythm_ratio_tolerance: float = 0.2
+    rhythm_min_pairs: int = 4
+    rhythm_min_consistency: float = 0.75
+    # Exclude ordinary onset uncertainty from the count-in window.
+    count_in_timing_tolerance_ms: float = 30.0
+    # Probe after a click for a voiced, stable guitar pitch so coincident notes are not masked.
+    click_pitch_probe_start_s: float = 0.03
+    click_pitch_probe_end_s: float = 0.14
+    click_pitch_min_frames: int = 3
+    click_pitch_max_spread_semitones: float = 0.5
+    click_pitch_min_probability: float = 0.45
+    # Retain loud attacks without a stable pitch only when they exceed measured click residue.
+    click_attack_ratio: float = 2.5
 
     # --- pitch ---
     tuning_offset_report_cents: float = 15.0
     note_intonation_cents: float = 25.0
+    # String-level tuning requires several stable notes separated from the take-wide median.
+    string_tuning_report_cents: float = 15.0
+    string_tuning_min_notes: int = 2
+    string_tuning_max_spread_cents: float = 12.0
 
     # --- dynamics / articulation ---
     attack_weak_db: float = 6.0
@@ -54,7 +72,8 @@ class Thresholds:
     buzz_excess_db: float = 6.0
 
     # --- tone check (descriptive labels only; placeholders, uncalibrated on real pedals) ---
-    tone_level_hot_dbfs: float = -1.0
+    # Ask for more headroom before the recording approaches digital full scale; not M0-calibrated.
+    tone_level_hot_dbfs: float = -3.0
     tone_level_low_dbfs: float = -30.0
     # Harmonics 5-20 vs 1-4. Clean synthetic plucks read about -15 to -13.5 dB. Even a square wave
     # only reaches about -11, so a squashed (low crest) and sustained (low decay) envelope also counts as drive.
@@ -74,6 +93,8 @@ class Thresholds:
     # --- prioritisation ---
     max_priorities: int = 3
     min_priority_confidence: float = 0.5
+    # Low-confidence findings are omitted from user-facing results, including experimental hints.
+    min_finding_confidence: float = 0.3
 
     def to_dict(self) -> dict:
         return asdict(self)

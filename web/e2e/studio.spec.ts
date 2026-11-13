@@ -86,6 +86,18 @@ test('demo take reaches results from the first screen without a guitar', async (
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });
 
+test('quarter-note practice uses a one-note-per-click custom reference', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('combobox', { name: 'Exercise', exact: true }).selectOption('major_scale_g');
+  await expect(page.getByText(/eighth notes · 2 per click/i)).toBeVisible();
+  await page.getByRole('checkbox', { name: /quarter-note practice/i }).check();
+  await expect(page.getByText(/quarter notes · 1 per click/i)).toBeVisible();
+  const response = done(page);
+  await page.getByRole('button', { name: 'Try a demo take' }).click();
+  const result = await envelope(await response);
+  expect(result.result.note_table).toHaveLength(15);
+});
+
 test('upload findings match direct analyze and evidence seeks normalized audio', async ({ page }) => {
   await select(page);
   await upload(page);

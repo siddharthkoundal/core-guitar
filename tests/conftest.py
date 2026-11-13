@@ -12,6 +12,7 @@ import pytest
 import soundfile as sf
 
 from coreguitar.analyze import analyze
+from coreguitar.config import DEFAULT, Thresholds
 from coreguitar.reference import load_exercise
 from coreguitar.synth import TakeSpec, render_take
 
@@ -23,15 +24,23 @@ EXERCISES = ROOT / "exercises"
 def run_take(tmp_path):
     counter = {"n": 0}
 
-    def _run(ex, spec: TakeSpec | None = None, *, free: bool = False, audio=None, sr: int = 44100):
+    def _run(
+        ex,
+        spec: TakeSpec | None = None,
+        *,
+        free: bool = False,
+        audio=None,
+        sr: int = 44100,
+        th: Thresholds = DEFAULT,
+    ):
         if audio is None:
             audio, _ = render_take(ex, spec, sr)
         counter["n"] += 1
         path = tmp_path / f"take{counter['n']}.wav"
         sf.write(path, audio, sr)
         if free:
-            return analyze(path, None, free_bpm=ex.bpm if ex else None)
-        return analyze(path, ex)
+            return analyze(path, None, free_bpm=ex.bpm if ex else None, th=th)
+        return analyze(path, ex, th=th)
 
     return _run
 

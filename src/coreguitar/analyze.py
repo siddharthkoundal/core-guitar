@@ -69,10 +69,17 @@ def analyze(path: str | Path, exercise: Exercise | None = None, *, free_bpm: flo
     notes: list = []
     if quality.usable:
         clicks = None
-        if grid is not None and grid.found and click_offset_s is None:
+        if grid is not None and grid.found:
             n_beats = int((len(y) / SR - grid.first_click_s) / grid.period_s) + 1
             clicks = [grid.beat_time(k) for k in range(n_beats)]
-        notes, _ = transcribe(yg, SR, quality.metrics.get("noise_floor_dbfs", -70.0), clicks)
+        notes, _ = transcribe(
+            yg,
+            SR,
+            quality.metrics.get("noise_floor_dbfs", -70.0),
+            clicks,
+            count_in_beats=exercise.beats_per_bar if exercise else 4,
+            th=th,
+        )
         post_checks(quality, notes, th, input_profile)
         result["notes"] = [n.to_dict() for n in notes]
     blocked_early = any(i["code"] in ("too_short", "silent") for i in quality.issues)

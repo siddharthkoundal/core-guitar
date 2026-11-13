@@ -21,6 +21,14 @@ KNOWLEDGE: dict[str, dict] = {
         "causes": ["Strings have drifted since the last tuning (common with new strings or temperature changes)."],
         "drill": "Tune every string with a tuner (A = 440 Hz) right before recording, then re-check the low E after tuning the others.",
     },
+    "string_tuning": {
+        "title": "One string sounds out of tune",
+        "causes": [
+            "That string may have drifted, or its tuning peg may have moved.",
+            "A string, fret, or setup issue can also shift notes on one string.",
+        ],
+        "drill": "Check the flagged string with a tuner, then compare its open note and a fretted note before recording again.",
+    },
     "wrong_note": {
         "title": "Wrong notes",
         "causes": [
@@ -73,6 +81,19 @@ KNOWLEDGE: dict[str, dict] = {
             "If every note is off by the same amount, check that the click isn't coming through Bluetooth headphones (they add delay).",
         ],
         "drill": "Play only the first note of each beat with the click at 60 BPM for one minute, aiming to make the click disappear under the note.",
+    },
+    "started_during_count_in": {
+        "title": "Started during the count-in",
+        "causes": ["The first clicks may have sounded like the start of the exercise."],
+        "drill": "Listen for all count-in clicks, then start the first note on the next beat.",
+    },
+    "rhythm_mismatch": {
+        "title": "Playing a different subdivision than the exercise",
+        "causes": [
+            "The click may be marking the beat while the written notes fall between clicks.",
+            "The subdivision may not yet feel familiar at this tempo.",
+        ],
+        "drill": "Count the subdivision out loud over the click, then play one note on each written subdivision at a slower tempo.",
     },
     "timing_drift_rushing": {
         "title": "Speeding up through the take",

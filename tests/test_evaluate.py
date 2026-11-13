@@ -4,7 +4,7 @@ import soundfile as sf
 
 from conftest import EXERCISES
 
-from coreguitar.evaluate import evaluate_dir
+from coreguitar.evaluate import GLOBAL_LABELS, LABEL_TO_FINDINGS, evaluate_dir
 from coreguitar.synth import TakeSpec, render_take
 
 
@@ -33,3 +33,10 @@ def test_evaluate_dir_scores_labelled_takes(tmp_path, chromatic):
         assert rep["per_type"][t]["recall"] == 1.0
     assert all(k.split("->")[0] == k.split("->")[1] for k in rep["verdicts"])
     assert rep["calibration"]["suggested_timing_uncertainty_ms"] < 10
+
+
+def test_new_product_findings_are_available_to_m0_labels():
+    assert LABEL_TO_FINDINGS["rhythm_mismatch"] == ("rhythm_mismatch",)
+    assert LABEL_TO_FINDINGS["count_in"] == ("started_during_count_in",)
+    assert LABEL_TO_FINDINGS["string_tuning"] == ("string_tuning",)
+    assert {"rhythm_mismatch", "count_in"} <= GLOBAL_LABELS

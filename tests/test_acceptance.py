@@ -3,9 +3,11 @@
 import numpy as np
 import pytest
 
+from coreguitar.config import Thresholds
 from coreguitar.reference import build_exercise, load_exercise
 from coreguitar.synth import TakeSpec
 from coreguitar.music import note_to_midi
+from coreguitar.synth import render_take
 
 from conftest import EXERCISES, types
 
@@ -64,7 +66,7 @@ def test_t4_drift_is_trend(run_take, chromatic):
     res = run_take(chromatic, TakeSpec(drift_ms_total=-150))
     t = confident(res)
     assert "timing_drift_rushing" in t
-    assert t.count("timing_early") <= 1
+    assert "timing_early" not in t and "timing_late" not in t
 
 
 # T5 dragging confined to bar 2 is localised.
@@ -186,3 +188,68 @@ def test_experimental_buzz(run_take, chromatic):
     buzz = [f for f in res["findings"] if f["type"] == "possible_buzz"]
     assert buzz and all(f["experimental"] and f["confidence"] <= 0.4 for f in buzz)
     assert all(p.get("type") != "possible_buzz" for p in res["priorities"])
+
+
+# T15 notes played on click instants remain detectable when their pitches are stable.
+def test_t15_click_coincident_pitched_attacks_are_kept(run_take):
+    ex = load_exercise(EXERCISES / "major_scale_g.json")
+    res = run_take(ex, TakeSpec(click_level=0.7, snr_db=70.0))
+    assert res["summary"]["alignment"]["match"] == len(ex.notes)
+    assert "missed_note" not in confident(res)
+
+
+# T16 a stable 2x inter-onset ratio is reported as a rhythm mismatch, not tempo drift.
+def test_t16_eighth_notes_played_as_quarters(run_take):
+    notes = "6/3 6/5 5/2 5/3 5/5 4/2 4/4 4/5"
+    reference = build_exercise(notes, bpm=70, default_duration="8")
+    played = build_exercise(notes, bpm=70, default_duration="4")
+    audio, _ = render_take(played, TakeSpec(seed=5))
+    res = run_take(reference, audio=audio)
+    rhythm = [f for f in res["findings"] if f["type"] == "rhythm_mismatch"]
+    assert len(rhythm) == 1
+    assert "quarter" in rhythm[0]["message"] and "eighth" in rhythm[0]["message"]
+    assert not any(f["type"].startswith("timing_") for f in res["findings"])
+
+
+# T17 notes begun before the exercise starts are identified as count-in playing.
+def test_t17_first_notes_during_count_in_are_not_reported_late(run_take):
+    ex = load_exercise(EXERCISES / "major_scale_g.json")
+    res = run_take(ex, TakeSpec(deviations_ms={0: -2600, 1: -2450, 5: 80}, seed=4))
+    assert [note["name"] for note in res["notes"][:2]] == ["G2", "A2"]
+    assert any(f["type"] == "started_during_count_in" for f in res["findings"])
+    assert not any("Did you start late?" in f["message"] for f in res["findings"])
+    assert any(f["type"] == "timing_late" and 5 in f["ref_indices"] for f in res["findings"])
+
+
+def test_t21_note_during_opening_rest_is_not_count_in_playing(run_take):
+    ex = build_exercise("r:4 6/3:4 6/5:4 5/2:4 5/3:4 5/5:4", bpm=80, default_duration="4")
+    res = run_take(ex, TakeSpec(deviations_ms={0: -400}, seed=7))
+    assert not any(f["type"] == "started_during_count_in" for f in res["findings"])
+
+
+# T18 one repeated scale apex is allowed without reducing note accuracy.
+def test_t18_repeated_top_note_is_allowed(run_take):
+    ex = load_exercise(EXERCISES / "major_scale_g.json")
+    apex = next(n for n in ex.notes if n.name == "G3")
+    res = run_take(ex, TakeSpec(extra=[(apex.index, apex.midi)], seed=6))
+    assert res["summary"]["note_accuracy"] == 1.0
+    assert "extra_note" not in confident(res)
+    assert res["summary"]["alignment"]["optional_repeat"] == 1
+
+
+# T19 notes from one consistently flat tab string are grouped into a tuning finding.
+def test_t19_out_of_tune_string_is_reported_as_a_group(run_take):
+    ex = build_exercise("6/3 6/5 5/2 5/3 5/5 4/2", bpm=80, default_duration="4")
+    res = run_take(ex, TakeSpec(note_tuning_cents={0: -30, 1: -30}, seed=9))
+    strings = [f for f in res["findings"] if f["type"] == "string_tuning"]
+    assert len(strings) == 1
+    assert strings[0]["measured"]["string"] == 6
+    assert strings[0]["ref_indices"] == [0, 1]
+
+
+# T20 low-confidence observations are omitted at the configured reporting floor.
+def test_t20_findings_obey_configured_confidence_floor(run_take, chromatic):
+    res = run_take(chromatic, TakeSpec(deviations_ms={5: 80}),
+                   th=Thresholds(min_finding_confidence=0.95))
+    assert res["findings"] == []
+    assert res["priorities"] == []

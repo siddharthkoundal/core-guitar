@@ -137,7 +137,7 @@ def tone_check(y: np.ndarray, raw: np.ndarray, notes: list[Note], th: Thresholds
         traits.append({"code": code, "label": label, "detail": detail, "attention": attention})
 
     if peak_dbfs >= th.tone_level_hot_dbfs:
-        trait("level_hot", "Level: very hot", f"Peaks reach {peak_dbfs:.1f} dBFS, at or near digital full scale.", True)
+        trait("level_hot", "Level: very hot", f"Peaks reach {peak_dbfs:.1f} dBFS, close to digital full scale.", True)
         advice.append("Lower the processor's output/USB level or the patch volume until peaks sit around -6 dBFS."
                       if direct else "Lower the amp volume or move the mic back until peaks sit around -6 dBFS.")
     elif peak_dbfs < th.tone_level_low_dbfs:
@@ -210,4 +210,3 @@ def tone_check(y: np.ndarray, raw: np.ndarray, notes: list[Note], th: Thresholds
 
 def is_driven(tone: dict | None) -> bool:
     return bool(tone) and any(t["code"] in ("drive_heavy", "compressed") for t in tone["traits"])
-

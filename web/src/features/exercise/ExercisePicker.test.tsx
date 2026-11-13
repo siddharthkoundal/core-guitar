@@ -27,3 +27,25 @@ it('defaults to the practice library and offers a demo take for the chosen riff'
   await userEvent.click(await screen.findByRole('button', { name: 'Try a demo take' }));
   expect(onDemo).toHaveBeenCalledWith({ mode: 'reference', exercise_id: 'major_scale_g', bpm: 90 });
 });
+
+it('shows the written subdivision and offers a quarter-note practice version', async () => {
+  const exercise = {
+    id: 'major_scale_g', name: 'G major scale', description: 'One octave', tuning: 'standard' as const,
+    bpm: 90, time_signature: [4, 4] as [number, number], default_duration: '8',
+    notes_text: '6/3 6/5 5/2 5/3 5/5 4/2 4/4 4/5', total_beats: 4,
+  };
+  vi.spyOn(api, 'exercises').mockResolvedValue([exercise]);
+  const onSelect = vi.fn();
+  const { userEvent } = render(<ExercisePicker onSelect={onSelect} onDemo={vi.fn()} />);
+  expect(await screen.findByText(/eighth notes · 2 per click/i)).toBeDefined();
+  await userEvent.click(screen.getByRole('checkbox', { name: /quarter-note practice/i }));
+  await userEvent.click(screen.getByRole('button', { name: 'Continue to capture' }));
+  expect(onSelect).toHaveBeenCalledWith({
+    mode: 'reference',
+    custom_exercise: {
+      notes: exercise.notes_text, bpm: 90, tuning: 'standard',
+      time_signature: [4, 4], default_duration: '4',
+    },
+    bpm: 90,
+  });
+});

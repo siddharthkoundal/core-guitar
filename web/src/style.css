@@ -159,6 +159,16 @@ input, select, textarea {
   border: 1px solid var(--border);
   border-radius: 2px;
 }
+input[type="checkbox"] {
+  display: inline-block;
+  width: 20px;
+  min-height: 20px;
+  height: 20px;
+  margin: 0 10px 0 0;
+  padding: 0;
+  accent-color: var(--accent);
+  vertical-align: middle;
+}
 textarea { min-height: 110px; font-family: var(--mono); }
 .form-row { display: flex; gap: 20px; flex-wrap: wrap; }
 .form-row label { flex: 1; min-width: 130px; }

@@ -13,7 +13,10 @@ Label file (one per take, `<name>.label.json`, paths relative to the label file)
     {"type": "wrong_note", "index": 9},
     {"type": "missed_note", "index": 14},
     {"type": "extra_note", "after": 3},
-    {"type": "rushing"}
+    {"type": "rushing"},
+    {"type": "rhythm_mismatch"},
+    {"type": "count_in"},
+    {"type": "string_tuning", "index": 5}
   ],
   "onsets_file": "takes/...onsets.txt"               // optional Audacity label export
 }
@@ -39,14 +42,17 @@ LABEL_TO_FINDINGS = {
     "extra_note": ("extra_note",),
     "rushing": ("timing_drift_rushing",),
     "dragging": ("timing_drift_dragging",),
+    "rhythm_mismatch": ("rhythm_mismatch",),
+    "count_in": ("started_during_count_in",),
     "timing_offset": ("timing_offset",),
     "tuning_offset": ("tuning_offset", "transposition"),
+    "string_tuning": ("string_tuning",),
     "weak_attack": ("weak_attack", "uneven_attacks"),
     "cut_short": ("cut_short",),
     "buzz": ("possible_buzz",),
     "ringing": ("possible_ringing",),
 }
-GLOBAL_LABELS = {"rushing", "dragging", "timing_offset", "tuning_offset"}
+GLOBAL_LABELS = {"rushing", "dragging", "rhythm_mismatch", "count_in", "timing_offset", "tuning_offset"}
 SCORED_FINDINGS = {f for v in LABEL_TO_FINDINGS.values() for f in v}
 
 

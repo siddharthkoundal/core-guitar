@@ -81,6 +81,15 @@ def test_tone_levels_hum_and_driven_helper():
     assert is_driven({"traits": [{"code": "drive_heavy"}]})
 
 
+def test_tone_near_full_scale_peak_is_flagged_for_headroom():
+    sr = 22050
+    t = np.arange(sr) / sr
+    y = (10 ** (-1.3 / 20) * np.sin(2 * np.pi * 220 * t)).astype(np.float32)
+    res = tone_check(y, y, [], DEFAULT, sr=sr)
+    assert res["metrics"]["peak_dbfs"] == pytest.approx(-1.3, abs=0.1)
+    assert res["traits"][0]["code"] == "level_hot"
+
+
 def test_unknown_input_profile_is_an_error(tmp_path, chromatic):
     with pytest.raises(ValueError):
         analyze(tmp_path / "missing.wav", chromatic, input_profile="usb")

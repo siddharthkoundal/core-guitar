@@ -53,6 +53,7 @@ class TakeSpec:
     missing: set[int] = field(default_factory=set)
     extra: list[tuple[int, int]] = field(default_factory=list)  # (after_ref_index, midi)
     tuning_cents: float = 0.0
+    note_tuning_cents: dict[int, float] = field(default_factory=dict)
     drift_ms_total: float = 0.0
     amp_overrides: dict[int, float] = field(default_factory=dict)
     buzz: dict[int, float] = field(default_factory=dict)
@@ -94,7 +95,14 @@ def render_take(ex: Exercise, spec: TakeSpec | None = None, sr: int = 44100) -> 
             dur = written + (0.5 if k + 1 == len(played) else 0.0)
         dur += 0.4 if spec.ring_prev else 0.0
         amp = spec.amp_overrides.get(n.index, 0.4)
-        y = pluck(midi + spec.tuning_cents / 100, dur, sr, amp, seed=spec.seed + n.index, buzz=spec.buzz.get(n.index, 0))
+        y = pluck(
+            midi + (spec.tuning_cents + spec.note_tuning_cents.get(n.index, 0.0)) / 100,
+            dur,
+            sr,
+            amp,
+            seed=spec.seed + n.index,
+            buzz=spec.buzz.get(n.index, 0),
+        )
         if spec.chord:
             for iv in (4, 7):
                 y = y + pluck(midi + iv + spec.tuning_cents / 100, dur, sr, amp, seed=spec.seed + 100 + iv + n.index)

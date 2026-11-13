@@ -9,8 +9,39 @@ export const defaultCustom: CustomExercise = {
   time_signature: [4, 4], default_duration: '8',
 };
 
+function rhythmDescription(exercise: Exercise): string {
+  const values = new Map<string, number>();
+  const noteNames: Record<number, string> = {
+    1: 'whole', 2: 'half', 4: 'quarter', 8: 'eighth', 16: 'sixteenth', 32: 'thirty-second',
+  };
+  for (const token of exercise.notes_text.replaceAll('|', ' ').split(/\s+/)) {
+    if (!token || token.split(':', 1)[0]?.toLowerCase() === 'r') continue;
+    const duration = token.split(':')[1] ?? exercise.default_duration;
+    const match = /^(1|2|4|8|16|32)(\.|t)?$/.exec(duration);
+    if (!match) continue;
+    const denominator = Number(match[1]);
+    const modifier = match[2];
+    const beats = exercise.time_signature[1] / denominator
+      * (modifier === '.' ? 1.5 : modifier === 't' ? 2 / 3 : 1);
+    const noteValue = exercise.time_signature[1] / beats;
+    const rounded = Math.round(noteValue);
+    const name = Math.abs(noteValue - rounded) < 0.1
+      ? `${noteNames[rounded] ?? 'subdivision'} notes`
+      : 'triplet subdivisions';
+    const perClick = 1 / beats;
+    const count = Number.isInteger(perClick) ? perClick : Number(perClick.toFixed(1));
+    values.set(name, count);
+  }
+  return [...values].map(([name, count]) => `${name} · ${count} per click`).join('; ');
+}
+
+function quarterNotes(notes: string): string {
+  return notes.replace(/:(?:1|2|4|8|16|32)(?:\.|t)?/g, ':4');
+}
+
 export function ExercisePicker({ onSelect, onDemo }: ExercisePickerProps) {
   const [mode, setMode] = useState('shipped');
+  const [quarterNotePractice, setQuarterNotePractice] = useState(false);
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [exerciseId, setExerciseId] = useState('');
   const [custom, setCustom] = useState(defaultCustom);
@@ -47,6 +78,19 @@ export function ExercisePicker({ onSelect, onDemo }: ExercisePickerProps) {
   function selection(): AnalysisRequest | null {
     if (!Number.isFinite(custom.bpm) || custom.bpm < 30 || custom.bpm > 240) return null;
     if (mode === 'shipped' && selected) {
+      if (quarterNotePractice) {
+        return {
+          mode: 'reference',
+          custom_exercise: {
+            notes: quarterNotes(selected.notes_text),
+            bpm: custom.bpm,
+            tuning: selected.tuning,
+            time_signature: selected.time_signature,
+            default_duration: '4',
+          },
+          bpm: custom.bpm,
+        };
+      }
       return { mode: 'reference', exercise_id: selected.id, bpm: custom.bpm };
     } else if (mode === 'custom' && preview?.key === key) {
       return { mode: 'reference', custom_exercise: custom, bpm: custom.bpm };
@@ -67,6 +111,12 @@ export function ExercisePicker({ onSelect, onDemo }: ExercisePickerProps) {
       }}>{exercises.map(ex => <option key={ex.id} value={ex.id}>{ex.name}</option>)}</select></label>
       <p>{selected?.description}</p>
       <p className="muted">{selected?.tuning.replaceAll('_', ' ')} tuning / {selected?.total_beats} beats</p>
+      {selected && rhythmDescription(selected) && <>
+        <p className="muted">{quarterNotePractice ? 'Quarter notes · 1 per click (practice version)' : rhythmDescription(selected)}</p>
+        <label><input type="checkbox" checked={quarterNotePractice}
+          onChange={event => setQuarterNotePractice(event.target.checked)} />
+          Quarter-note practice (one note per click)</label>
+      </>}
     </>}
     <div className="form-row">
       <label>BPM<input type="number" min="30" max="240" value={custom.bpm}

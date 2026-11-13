@@ -10,5 +10,5 @@
     {"type": "late", "index": 5}
   ],
   "onsets_file": "2026-05-01_mac_chromatic_80_late5.onsets.txt",
-  "notes": "Free text for yourself. Delete onsets_file if you didn't hand-label onsets. Error types: late, early, wrong_note, missed_note, extra_note (uses 'after'), rushing, dragging, timing_offset, tuning_offset, weak_attack, cut_short, buzz, ringing."
+  "notes": "Free text for yourself. Delete onsets_file if you didn't hand-label onsets. Error types: late, early, wrong_note, missed_note, extra_note (uses 'after'), rushing, dragging, rhythm_mismatch, count_in, timing_offset, tuning_offset, string_tuning (uses 'index'), weak_attack, cut_short, buzz, ringing."
 }

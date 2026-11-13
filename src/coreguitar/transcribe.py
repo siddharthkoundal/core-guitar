@@ -9,6 +9,7 @@ import numpy as np
 from scipy import signal
 
 from .config import (
+    DEFAULT,
     GUITAR_BAND_MAX_HZ,
     GUITAR_FMAX,
     GUITAR_FMIN,
@@ -16,6 +17,7 @@ from .config import (
     PITCH_FRAME,
     PITCH_HOP,
     SR,
+    Thresholds,
 )
 from .music import midi_to_name
 
@@ -83,16 +85,35 @@ def _level_envelope(yg: np.ndarray, sr: int) -> np.ndarray:
     return np.sqrt(np.convolve(yg.astype(np.float64) ** 2, np.ones(w) / w, mode="same"))
 
 
+def _stable_pitch_after(pt: PitchTrack, t: float, th: Thresholds) -> bool:
+    selected = (pt.times >= t + th.click_pitch_probe_start_s) & (pt.times <= t + th.click_pitch_probe_end_s)
+    voiced = selected & pt.voiced & np.isfinite(pt.f0)
+    if int(voiced.sum()) < th.click_pitch_min_frames:
+        return False
+    midi = 69 + 12 * np.log2(pt.f0[voiced] / 440.0)
+    return bool(
+        np.ptp(midi) <= th.click_pitch_max_spread_semitones
+        and np.mean(pt.prob[voiced]) >= th.click_pitch_min_probability
+    )
+
+
 MIN_FLUX = 0.1
 
 
 def attack_onsets(
-    yg: np.ndarray, sr: int, noise_db: float, click_times: list[float] | None = None
+    yg: np.ndarray,
+    sr: int,
+    noise_db: float,
+    click_times: list[float] | None = None,
+    *,
+    pt: PitchTrack | None = None,
+    count_in_beats: int = 4,
+    th: Thresholds = DEFAULT,
 ) -> tuple[np.ndarray, list[str]]:
     """Return (onset_times, sources). Source is 'attack', or 'attack_weak' when the
     attack could not be refined (legato notes masked by the previous note's harmonics).
-    Click residue left after the band-stop is measured on the first two (count-in)
-    clicks, where the protocol says nobody is playing, and suppressed elsewhere."""
+    Click residue is measured only on count-in clicks without a stable pitch, so
+    a guitar attack during the count-in cannot inflate the suppression threshold."""
     strength = librosa.onset.onset_strength(
         y=yg, sr=sr, hop_length=ONSET_HOP, fmax=GUITAR_BAND_MAX_HZ, max_size=3, lag=2
     )
@@ -126,12 +147,22 @@ def attack_onsets(
             i0, i1 = int((t - 0.01) * sr / ONSET_HOP), int((t + 0.05) * sr / ONSET_HOP) + 1
             return float(strength[max(0, i0) : i1].max(initial=0.0))
 
-        residue = max(peak_near(t) for t in clicks[:2])
+        count_in = clicks[:count_in_beats]
+        count_in_peaks = [peak_near(t) for t in count_in]
+        clean_peaks = [
+            peak_near(t) for t in count_in
+            if pt is None or not _stable_pitch_after(pt, float(t), th)
+        ]
+        residue = float(np.median(clean_peaks)) if clean_peaks else min(count_in_peaks, default=floor)
         keep = []
         for c in coarse:
             d = c - clicks
-            near = np.any((d > -0.01) & (d < 0.05))
-            if not near or peak_near(c - 0.02) > max(2.5 * residue, floor):
+            near_indices = np.flatnonzero((d > -0.01) & (d < 0.05))
+            if not len(near_indices):
+                keep.append(c)
+                continue
+            pitched = pt is not None and _stable_pitch_after(pt, float(c), th)
+            if pitched or peak_near(c) > max(th.click_attack_ratio * residue, floor):
                 keep.append(c)
         coarse = np.array(keep)
     raw, smooth = _attack_envelopes(yg, sr)
@@ -357,10 +388,18 @@ def _is_damping(yg: np.ndarray, sr: int, n: Note, max_rise_db: float = 1.0, drop
 
 
 def transcribe(
-    yg: np.ndarray, sr: int, noise_db: float, click_times: list[float] | None = None
+    yg: np.ndarray,
+    sr: int,
+    noise_db: float,
+    click_times: list[float] | None = None,
+    *,
+    count_in_beats: int = 4,
+    th: Thresholds = DEFAULT,
 ) -> tuple[list[Note], PitchTrack]:
     pt = pitch_track(yg, sr)
-    att, att_src = attack_onsets(yg, sr, noise_db, click_times)
+    att, att_src = attack_onsets(
+        yg, sr, noise_db, click_times, pt=pt, count_in_beats=count_in_beats, th=th
+    )
     pc = pitch_change_onsets(pt, att, _level_envelope(yg, sr), sr, noise_db)
     onsets = np.concatenate([att, pc])
     sources = att_src + ["pitch_change"] * len(pc)

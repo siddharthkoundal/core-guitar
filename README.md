@@ -9,8 +9,9 @@ recording.
 
 **Stage 1A app.** A desktop-local browser UI now supports exercise selection,
 custom riffs, free play, PCM WAV microphone recording, file upload, and
-timestamped evidence playback. The analysis engine and its thresholds are
-unchanged. There is no score, automatic tempo adjustment, or automatic calibration.
+timestamped evidence playback. The analyzer provides measured note, rhythm,
+tuning and input-quality findings; its thresholds remain uncalibrated until M0.
+There is no score, automatic tempo adjustment, or automatic calibration.
 
 The studio uses a rock rehearsal-room visual style: gig-poster typography and
 red/off-white controls. A three-step practice strip
@@ -113,7 +114,9 @@ the existing CLI commands do not import FastAPI or uvicorn. `serve` checks for
 both ffmpeg and ffprobe before starting. Stop it with Ctrl+C.
 
 **Quickest first test (no guitar or microphone):** keep the default exercise and
-press **Try a demo take**. The local server generates a synthetic take of that
+press **Try a demo take**. The exercise card shows the written subdivision and
+notes per click; the optional quarter-note practice setting changes a shipped
+riff to one note per click. The local server generates a synthetic take of that
 riff with one note played 80 ms late (`POST /api/demo-take`), then uploads and
 analyzes it, so you land on results with a single timing finding. For a real take,
 press **Continue to capture** and record or upload. Custom riffs and free play
@@ -316,10 +319,12 @@ pentatonic box 1, and a riff template.
 | Layer | Method | Status |
 |---|---|---|
 | Click / beat grid | Matched filter on the 4 kHz click inside the recording; grid fit | Reliable on synthetic audio; needs M0 check per device |
-| Note onsets | Spectral flux with a noise-adaptive floor, refined on the attack envelope | Same |
+| Note onsets | Spectral flux with a noise-adaptive floor, refined on the attack envelope; click-coincident attacks are retained when a stable pitch follows | Synthetic tests only; needs M0 check on real takes |
 | Pitch | pYIN + note segmentation | Same |
-| Alignment | Dynamic programming of detected notes vs reference | Same |
-| Timing, wrong, missed and extra notes, drift, tuning offset | Measured from the above, with confidence gated by measurement uncertainty | Same |
+| Alignment | Dynamic programming of detected notes vs reference; one repeated summit note is allowed in a clear ascending/descending scale | Synthetic tests only |
+| Timing | Start offset from the first matched note; consistent 2x/½x subdivision changes are reported as rhythm mismatches instead of drift | Synthetic tests only; not validated on real playing |
+| Wrong, missed and extra notes | Measured from the above, with low-confidence findings hidden below the configured reporting floor | Same |
+| Tuning | Overall pitch offset plus consistent string-level differences when the reference uses tab notation | Synthetic tests only; string-level tuning is not a calibrated tuner |
 | Input-quality gates | SNR, clipping, polyphony cue, click presence | Polyphony and noise OK on synthetic audio; **distortion gate uncalibrated** |
 | Dynamics (weak or uneven attacks) | Attack level, detrended by pitch, with same-pitch confirmation | Low confidence by design (the room and amp colour the loudness) |
 | Ringing, buzz | Spectral heuristics | **Experimental**: capped confidence, never top-3 |
@@ -333,6 +338,9 @@ pentatonic box 1, and a riff template.
 - **The full findings list**, with confidence levels.
 - **An uncertainty section.**
 - **A re-record request** when the input is unusable.
+- The exercise picker shows written subdivisions and clicks per note. The
+  optional quarter-note practice setting creates a one-note-per-click version
+  of a shipped exercise for slower, simpler practice.
 
 ## Tests
 
@@ -371,13 +379,15 @@ this is a local timing sample, not a cross-hardware performance guarantee.
 7. Cancel recording: no upload. Cancel analysis: the take remains. Delete it:
    normalized audio and result files are removed.
 
-The acceptance tests T1–T14 run on synthetic takes with known injected errors:
+The acceptance tests T1–T20 run on synthetic takes with known injected errors:
 
 - correct, late/early, wrong, missed and extra notes, drift;
 - tuning and transposition;
 - noisy, clipped, silent, chord and distorted input;
 - missing click;
-- free mode;
+- free mode and experimental buzz;
+- click-coincident notes, count-in starts, half/double-time rhythm, repeated scale
+  summits, out-of-tune tab strings, and the low-confidence reporting floor;
 - the evaluation tool.
 
 The distortion test is marked `xfail`: synthetic distortion is not a valid
